@@ -1,0 +1,12 @@
+app:
+  security:
+    bcrypt-strength: 4
+    refresh:
+      reuse-grace: 500ms
+    login-rate-limit:
+      max-failures-per-identifier: 5
+      max-attempts-per-ip: 100000
+logging:
+  level:
+    com.truckgo: WARN
+    com.truckgo.audit: INFO
