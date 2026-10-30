@@ -72,6 +72,11 @@ app:
       max-failures-per-identifier: ${LOGIN_MAX_FAILURES:5}
       max-attempts-per-ip: ${LOGIN_MAX_ATTEMPTS_PER_IP:30}
       window: ${LOGIN_RATE_LIMIT_WINDOW:15m}
+  driver:
+    # Vietnamese PET driving licence numbers have 12 digits.
+    license-number-pattern: ${DRIVER_LICENSE_NUMBER_PATTERN:^[0-9]{12}$}
+    # Classes allowed to drive trucks (Luật TTATGT 2024 + legacy B2/FC still in circulation).
+    allowed-license-classes: ${DRIVER_ALLOWED_LICENSE_CLASSES:B,B2,C1,C,CE,D,FC}
 logging:
   pattern:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger{36} [requestId=%X{requestId:-}] - %msg%n%ex"
