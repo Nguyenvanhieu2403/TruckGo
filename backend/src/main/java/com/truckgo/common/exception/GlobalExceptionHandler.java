@@ -21,29 +21,29 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(ResourceNotFoundException.class)
-    ResponseEntity<ApiResponse<Void>> notFound(ResourceNotFoundException ex, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> notFound(ResourceNotFoundException ex, HttpServletRequest request) {
         return response(HttpStatus.NOT_FOUND, ex.getMessage(), request);
     }
 
     @ExceptionHandler({BusinessException.class, IllegalArgumentException.class, MethodArgumentTypeMismatchException.class})
-    ResponseEntity<ApiResponse<Void>> badRequest(Exception ex, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> badRequest(Exception ex, HttpServletRequest request) {
         return response(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    ResponseEntity<ApiResponse<Map<String, String>>> validation(MethodArgumentNotValidException ex, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Map<String, String>>> validation(MethodArgumentNotValidException ex, HttpServletRequest request) {
         Map<String, String> errors = ex.getBindingResult().getFieldErrors().stream()
                 .collect(Collectors.toMap(FieldError::getField, error -> error.getDefaultMessage() == null ? "Giá trị không hợp lệ" : error.getDefaultMessage(), (first, ignored) -> first));
         return ResponseEntity.badRequest().body(ApiResponse.failure("Dữ liệu không hợp lệ", errors, request.getRequestURI()));
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
-    ResponseEntity<ApiResponse<Void>> constraint(ConstraintViolationException ex, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> constraint(ConstraintViolationException ex, HttpServletRequest request) {
         return response(HttpStatus.BAD_REQUEST, "Dữ liệu không hợp lệ", request);
     }
 
     @ExceptionHandler(Exception.class)
-    ResponseEntity<ApiResponse<Void>> unexpected(Exception ex, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> unexpected(Exception ex, HttpServletRequest request) {
         log.error("Unhandled request error path={}", request.getRequestURI(), ex);
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "Đã xảy ra lỗi hệ thống", request);
     }
