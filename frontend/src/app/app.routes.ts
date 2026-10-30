@@ -4,6 +4,7 @@ import { SystemComponent } from './features/system/system.component';
 import { PlaceholderComponent } from './shared/placeholder.component';
 import { AppShellComponent } from './shared/app-shell.component';
 import { authGuard, guestGuard, roleGuard } from './core/auth/auth.guards';
+import { unsavedChangesGuard } from './features/shipments/unsaved-changes.guard';
 
 export const routes: Routes = [
   { path: '', component: HomeComponent },
@@ -15,7 +16,16 @@ export const routes: Routes = [
     path: '', component: AppShellComponent, canActivate: [authGuard],
     children: [
       { path: 'profile', loadComponent: () => import('./features/profile/profile.component').then(m => m.ProfileComponent) },
-      { path: 'customer', canActivate: [roleGuard('CUSTOMER')], loadComponent: () => import('./features/customer/customer-home.component').then(m => m.CustomerHomeComponent) },
+      {
+        path: 'customer', canActivate: [roleGuard('CUSTOMER')],
+        children: [
+          { path: '', pathMatch: 'full', loadComponent: () => import('./features/customer/customer-home.component').then(m => m.CustomerHomeComponent) },
+          { path: 'shipments', loadComponent: () => import('./features/shipments/shipment-list.component').then(m => m.ShipmentListComponent) },
+          { path: 'shipments/create', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/shipments/shipment-wizard.component').then(m => m.ShipmentWizardComponent) },
+          { path: 'shipments/:id', loadComponent: () => import('./features/shipments/shipment-detail.component').then(m => m.ShipmentDetailComponent) },
+          { path: 'shipments/:id/edit', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/shipments/shipment-wizard.component').then(m => m.ShipmentWizardComponent) },
+        ],
+      },
       {
         path: 'driver', canActivate: [roleGuard('DRIVER')],
         children: [
@@ -32,6 +42,8 @@ export const routes: Routes = [
           { path: 'drivers', loadComponent: () => import('./features/admin/admin-drivers.component').then(m => m.AdminDriversComponent) },
           { path: 'vehicles', loadComponent: () => import('./features/admin/admin-vehicles.component').then(m => m.AdminVehiclesComponent) },
           { path: 'users', loadComponent: () => import('./features/admin/admin-users.component').then(m => m.AdminUsersComponent) },
+          { path: 'shipments', data: { admin: true }, loadComponent: () => import('./features/shipments/shipment-list.component').then(m => m.ShipmentListComponent) },
+          { path: 'shipments/:id', data: { admin: true }, loadComponent: () => import('./features/shipments/shipment-detail.component').then(m => m.ShipmentDetailComponent) },
         ],
       },
     ],

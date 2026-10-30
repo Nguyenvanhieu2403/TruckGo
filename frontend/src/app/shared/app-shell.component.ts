@@ -2,12 +2,12 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
 
-interface NavItem { path: string; label: string; }
+interface NavItem { path: string; label: string; exact?: boolean; }
 
 const NAV: Record<string, NavItem[]> = {
-  CUSTOMER: [{ path: '/customer', label: 'Tổng quan' }, { path: '/profile', label: 'Hồ sơ' }],
+  CUSTOMER: [{ path: '/customer', label: 'Tổng quan', exact: true }, { path: '/customer/shipments', label: 'Đơn vận chuyển' }, { path: '/profile', label: 'Hồ sơ' }],
   DRIVER: [{ path: '/driver/verification', label: 'Trạng thái duyệt' }, { path: '/driver/profile', label: 'Giấy phép' }, { path: '/driver/vehicles', label: 'Phương tiện' }, { path: '/profile', label: 'Tài khoản' }],
-  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/profile', label: 'Tài khoản' }],
+  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/profile', label: 'Tài khoản' }],
 };
 
 /** Layout for signed-in areas. Menu items depend on role but every API call is still authorised server-side. */
@@ -22,7 +22,7 @@ const NAV: Record<string, NavItem[]> = {
       <button class="menu-toggle" type="button" (click)="open.set(!open())" [attr.aria-expanded]="open()" aria-controls="shell-nav">Menu</button>
       <nav id="shell-nav" [class.open]="open()" aria-label="Điều hướng tài khoản">
         @for (item of nav(); track item.path) {
-          <a [routerLink]="item.path" routerLinkActive="active" (click)="open.set(false)">{{ item.label }}</a>
+          <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.exact ?? false }" (click)="open.set(false)">{{ item.label }}</a>
         }
       </nav>
       <div class="shell-user">
