@@ -25,6 +25,15 @@ export const routes: Routes = [
           { path: 'vehicles', loadComponent: () => import('./features/driver/driver-vehicles.component').then(m => m.DriverVehiclesComponent) },
         ],
       },
+      {
+        path: 'admin', canActivate: [roleGuard('ADMIN')],
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'drivers' },
+          { path: 'drivers', loadComponent: () => import('./features/admin/admin-drivers.component').then(m => m.AdminDriversComponent) },
+          { path: 'vehicles', loadComponent: () => import('./features/admin/admin-vehicles.component').then(m => m.AdminVehiclesComponent) },
+          { path: 'users', loadComponent: () => import('./features/admin/admin-users.component').then(m => m.AdminUsersComponent) },
+        ],
+      },
     ],
   },
   { path: '**', redirectTo: '' },
