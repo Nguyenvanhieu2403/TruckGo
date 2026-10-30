@@ -1,6 +1,7 @@
 package com.truckgo.common.exception;
 
 import com.truckgo.common.response.ApiResponse;
+import com.truckgo.storage.StorageUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -20,6 +21,9 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Map;
@@ -103,6 +107,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.retryAfterSeconds()))
                 .body(ApiResponse.failure(ex.getMessage(), null, request.getRequestURI()));
+    }
+
+    @ExceptionHandler(StorageUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> storageUnavailable(StorageUnavailableException ex, HttpServletRequest request) {
+        return response(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> uploadTooLarge(MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        return response(HttpStatus.PAYLOAD_TOO_LARGE, "Tệp vượt quá dung lượng cho phép", request);
+    }
+
+    @ExceptionHandler({MissingServletRequestPartException.class, MultipartException.class})
+    public ResponseEntity<ApiResponse<Void>> badMultipart(Exception ex, HttpServletRequest request) {
+        return response(HttpStatus.BAD_REQUEST, "Vui lòng chọn tệp hợp lệ", request);
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
