@@ -1,6 +1,11 @@
 spring:
   jpa:
     show-sql: false
+app:
+  security:
+    refresh:
+      # Local HTTP development only. The prod profile refuses to start with a non-Secure cookie.
+      cookie-secure: ${REFRESH_COOKIE_SECURE:false}
 logging:
   level:
     org.flywaydb: INFO
