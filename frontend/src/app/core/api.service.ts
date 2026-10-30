@@ -15,7 +15,8 @@ export function toApiError(error: unknown): ApiError {
   if (error instanceof HttpErrorResponse) {
     const body = error.error as Partial<ApiResponse<unknown>> | null;
     const data = body && typeof body.data === 'object' && body.data !== null ? body.data as Record<string, string> : {};
-    const fallback = error.status === 0 ? 'Không thể kết nối tới máy chủ' : error.status === 403 ? 'Bạn không có quyền thực hiện thao tác này' : 'Đã xảy ra lỗi, vui lòng thử lại';
+    const fallback = error.status === 0 ? 'Không thể kết nối tới máy chủ' : error.status === 403 ? 'Bạn không có quyền thực hiện thao tác này'
+      : error.status === 413 ? 'Tệp vượt quá dung lượng cho phép' : 'Đã xảy ra lỗi, vui lòng thử lại';
     return { status: error.status, message: body?.message || fallback, fieldErrors: data };
   }
   return { status: 0, message: 'Đã xảy ra lỗi, vui lòng thử lại', fieldErrors: {} };
