@@ -1,18 +1,23 @@
-# TruckGo — Sprint 2
+# TruckGo — Sprint 3
 
-Nền tảng kết nối khách hàng thuê xe tải với tài xế. Sprint 1 dựng nền tảng kỹ thuật (Angular SPA, Spring Boot, PostgreSQL, Redis, Flyway). Sprint 2 bổ sung **tài khoản, xác thực/phân quyền, hồ sơ người dùng, hồ sơ tài xế, phương tiện và quy trình duyệt của quản trị viên**.
+Nền tảng kết nối khách hàng thuê xe tải với tài xế.
 
-Chưa có: tạo đơn vận chuyển, tính giá, nhận đơn, GPS, thanh toán, đánh giá (các sprint sau).
+- Sprint 1: nền tảng kỹ thuật (Angular SPA, Spring Boot, PostgreSQL, Redis, Flyway).
+- Sprint 2: tài khoản, xác thực/phân quyền, hồ sơ người dùng, hồ sơ tài xế, phương tiện, duyệt của quản trị viên.
+- Sprint 3: **quản lý đơn vận chuyển** — wizard 5 bước, nhiều điểm giao, nhiều dòng hàng, tổng trọng lượng/thể tích do máy chủ tính, yêu cầu xe, dịch vụ bổ sung, ảnh hàng hóa trên MinIO, lưu nháp/đăng/sửa/hủy/xóa nháp, lịch sử trạng thái.
+
+Chưa có: tính giá cước (Sprint 4), tài xế tìm/nhận đơn (Sprint 5), GPS, thanh toán, đánh giá.
 
 ## Kiến trúc
 
 - `frontend/`: Angular 22 standalone, TypeScript strict, Router, Reactive Forms, HttpClient, Signals; functional interceptor/guard. Không dùng UI library — dùng SCSS tự viết như Sprint 1 (UI kit chung trong `src/styles.scss`).
 - `backend/`: Java 21, Spring Boot 3.5, Spring Security 6 (OAuth2 Resource Server + Nimbus JOSE cho JWT), JPA, Redis, Validation, Flyway; REST prefix `/api/v1`.
 - PostgreSQL là nguồn dữ liệu chính (tài khoản, hồ sơ, xe, phiên refresh, audit log). Hibernate `validate`, schema do Flyway quản lý.
-- Redis dùng cho giới hạn số lần đăng nhập.
+- Redis dùng cho giới hạn số lần đăng nhập và cache danh mục đặt đơn (không bao giờ cache đơn hàng).
+- MinIO (S3) lưu ảnh hàng hóa trong bucket riêng tư; PostgreSQL chỉ lưu metadata.
 - Nginx phục vụ SPA và proxy `/api` về backend **cùng origin**, nên cookie refresh `SameSite=Strict` hoạt động không cần CORS.
 
-Package backend: `auth` (đăng ký/đăng nhập/refresh/logout, rate limit), `security` (JWT, SecurityFilterChain, CORS), `user`, `driver`, `vehicle`, `admin`, `common`.
+Package backend (package-by-feature): `auth`, `security`, `user`, `driver`, `vehicle`, `admin`, `catalog` (danh mục + cache), `shipment` (đơn vận chuyển), `storage` (`StorageService` + adapter MinIO), `geo` (abstraction bản đồ), `common`.
 
 ## Kiến trúc xác thực
 
@@ -94,6 +99,88 @@ Lỗi validation/nghiệp vụ theo trường trả `data: { "field": "thông b�
 - **Xe**: biển số chuẩn hóa (`51C-123.45` → `51C12345`), unique; tải trọng 1–60.000 kg, kích thước > 0 (dài ≤ 2000, rộng ≤ 400, cao ≤ 500 cm); hạn đăng kiểm phải sau hôm nay (khi tạo, sửa và gửi duyệt); `vehicle_type` là enum (`VAN, SMALL_TRUCK, MEDIUM_TRUCK, LARGE_TRUCK, CONTAINER_TRUCK, REFRIGERATED_TRUCK`). Một tài xế có nhiều xe.
 - Chỉ tài xế `APPROVED` có xe `APPROVED` mới đủ điều kiện nhận đơn (áp dụng khi Sprint 3 xây nghiệp vụ đơn).
 
+## Quản lý đơn vận chuyển (Sprint 3)
+
+### Quy trình tạo đơn (`/customer/shipments/create`)
+
+| Bước | Nội dung |
+|---|---|
+| 1. Địa điểm | Thời gian lấy hàng, hạn giao (tuỳ chọn); điểm lấy và một hoặc nhiều điểm giao: người liên hệ, SĐT, tỉnh/quận/phường, địa chỉ chi tiết, GPS tuỳ chọn, ghi chú |
+| 2. Hàng hóa | Nhiều dòng hàng: tên, loại, mô tả, số kiện, kg/kiện, dài × rộng × cao; tổng tạm tính; ảnh hàng hóa (sau khi lưu nháp) |
+| 3. Phương tiện | Loại xe theo tải trọng danh nghĩa (hoặc để hệ thống gợi ý), loại thùng, số xe, tải trọng/kích thước thùng tối thiểu; cảnh báo nếu hàng nặng hơn tải trọng |
+| 4. Dịch vụ | Bốc/dỡ hàng, điều kiện địa điểm, đặc điểm hàng, yêu cầu khác, ghi chú — sinh tự động từ danh mục |
+| 5. Xác nhận | Tổng hợp toàn bộ; giá cước hiển thị *“Chưa tính giá – sẽ được hệ thống báo giá ở bước tiếp theo”*; **Lưu nháp** hoặc **Đăng đơn** |
+
+Wizard kiểm tra từng bước trước khi đi tiếp, giữ dữ liệu khi quay lại, chặn bấm lặp, ánh xạ lỗi từ máy chủ về đúng trường và bước, hỏi xác nhận khi rời trang có thay đổi chưa lưu.
+
+### Trạng thái
+
+`DRAFT, PUBLISHED, ASSIGNED, DRIVER_ARRIVED, PICKED_UP, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED, EXPIRED` được định nghĩa cùng bảng chuyển trạng thái (`ShipmentStatus`). Sprint 3 chỉ thực hiện `DRAFT → PUBLISHED`, `DRAFT → CANCELLED`, `PUBLISHED → CANCELLED`. Mọi chuyển trạng thái khác (vd. `CANCELLED → PUBLISHED`, `COMPLETED → CANCELLED`, `PUBLISHED → COMPLETED`) bị từ chối 409. Mỗi lần đổi trạng thái ghi một dòng `shipment_status_histories` (người đổi, lý do); bảng này chỉ thêm, không sửa/xóa.
+
+- **Sửa**: chỉ đơn `DRAFT` của chính mình; `PUT` thay toàn bộ điểm dừng, hàng hóa, dịch vụ (ảnh giữ nguyên) và yêu cầu `version` đã đọc (optimistic locking, lệch phiên bản → 409). *Quyết định*: đơn đã đăng không sửa được trong Sprint 3 (theo mục 6.2); khách hủy rồi tạo đơn mới.
+- **Đăng**: cần ≥ 1 điểm lấy, ≥ 1 điểm giao (điểm đầu là điểm lấy), ≥ 1 dòng hàng có đủ kích thước, tổng trọng lượng > 0, thời gian lấy hàng sau hiện tại ít nhất `SHIPMENT_MIN_PICKUP_LEAD` (15 phút), danh mục còn hiệu lực. Không gán tài xế, không tạo giá. Database cũng chặn `pickup_time < published_at`.
+- **Hủy**: chỉ `DRAFT`/`PUBLISHED`, lý do 5–500 ký tự.
+- **Xóa**: chỉ `DRAFT`, xóa mềm (`deleted_at`) và xóa ảnh trên MinIO sau khi transaction commit.
+- Đơn của người khác luôn trả **404**; tài xế bị chặn **403** khỏi `/shipments/**` (Sprint 5 sẽ có API riêng chỉ lộ các trường cần thiết); admin xem được, không thao tác thay khách.
+
+### Công thức hàng hóa (BigDecimal, máy chủ tính lại mỗi lần lưu)
+
+```
+Tổng trọng lượng dòng  = Số kiện × Kg/kiện                       (kg, 2 chữ số thập phân)
+Thể tích 1 kiện        = Dài × Rộng × Cao / 1.000.000             (cm → m³)
+Tổng thể tích dòng     = Số kiện × Thể tích 1 kiện                 (m³, 6 chữ số, làm tròn HALF_UP)
+Tổng đơn               = Σ các dòng
+```
+
+Các giá trị `totalWeightKg`, `totalVolumeM3`, `customerId`, `status`, `estimatedPrice` do client gửi đều bị bỏ qua. Dòng hàng chưa có kích thước không cộng vào thể tích và phải bổ sung trước khi đăng. Ví dụ trong đề (10×20 kg 50×40×30, 2×35 kg 120×60×75, 1×60 kg 70×70×180) cho **330 kg, 2,562 m³** — có test cả backend và frontend.
+
+### Cảnh báo phương tiện
+
+Phản hồi đơn có `warnings` (chỉ cảnh báo, không chặn): `VEHICLE_PAYLOAD_INSUFFICIENT`, `MINIMUM_PAYLOAD_BELOW_WEIGHT`, `VEHICLE_BELOW_MINIMUM_PAYLOAD`, `VOLUME_EXCEEDS_CARGO`, `ITEM_EXCEEDS_CARGO_SIZE`, `DIMENSIONS_MISSING`. Tải trọng trong danh mục là **danh nghĩa**; hệ thống không bao giờ khẳng định một xe phù hợp hay hợp lệ. Việc ghép xe ở Sprint 5 phải kiểm tra tải trọng thực tế của xe đã duyệt và quy định pháp luật.
+
+### Danh mục (`/catalogs/*`) và Redis
+
+Bảng `item_categories`, `vehicle_types` (500 kg … trên 15 tấn), `vehicle_body_types`, `shipment_service_definitions` (+ `shipment_service_options`) được seed trong V3. Frontend lấy danh mục từ API, không giữ danh sách riêng; backend validate theo cùng dữ liệu. Dịch vụ có kiểu giá trị `BOOLEAN | OPTION | NUMBER | TEXT` và `exclusive_group` (vd. có/không có thang máy). Tên dịch vụ lưu vào đơn được lấy từ danh mục, không từ request.
+
+Cache: JSON trong Redis, key `catalog:v1:*`, TTL `CATALOG_CACHE_TTL` (mặc định 1h). Admin bật/tắt mục qua `PATCH /admin/catalogs/{catalog}/{code}` → cache bị xóa **sau khi commit**; `POST /admin/catalogs/cache/evict` dùng khi sửa danh mục trực tiếp trong DB. Redis lỗi → đọc thẳng PostgreSQL, đơn hàng không bị ảnh hưởng.
+
+### Ảnh hàng hóa và lưu trữ
+
+- `StorageService` (put/get/delete) với `MinioStorageService` (MinIO Java SDK, mọi endpoint S3) và `DisabledStorageService` khi `STORAGE_PROVIDER=none` — lúc đó upload trả **503**, không giả thành công.
+- Chỉ chủ đơn, chỉ khi `DRAFT`, tối đa 10 ảnh/đơn, 5 MB/ảnh (413). Định dạng xác định bằng **magic bytes** (JPEG/PNG/WebP), không dựa vào tên hay Content-Type (sai → 415).
+- Object key do máy chủ sinh: `shipments/{shipmentId}/{uuid}.{ext}`; tên tệp gốc chỉ làm tên hiển thị đã làm sạch, không bao giờ dùng làm đường dẫn.
+- Bucket riêng tư, tạo tự động; ảnh được trả qua `GET /shipments/{id}/attachments/{aid}/content` sau khi kiểm tra quyền (`Cache-Control: private`, `nosniff`). Client không thấy endpoint, bucket, key hay credential MinIO.
+- Upload: ghi object rồi lưu metadata; lưu metadata lỗi → xóa object. Xóa: xóa metadata, xóa object sau commit; lỗi xóa object được log kèm key để dọn sau.
+- nginx cho phép body tới 6 MB trên `/api/` (mặc định 1 MB sẽ chặn ảnh).
+- Image MinIO chính thức không còn tải được từ Docker Hub/quay.io; Compose và Testcontainers dùng bản build MinIO của Chainguard, pin theo digest.
+
+### Bản đồ
+
+`GeocodingProvider` là điểm nối cho Google Maps/Mapbox/OpenStreetMap. Mặc định `app.maps.provider=none`: nhập địa chỉ thủ công, tọa độ chỉ lưu khi người dùng nhập (cả vĩ độ và kinh độ, trong phạm vi hợp lệ) — **không tự đoán tọa độ**. `full_address` được ghép từ các phần có cấu trúc; tọa độ lưu riêng cho Sprint 4.
+
+### API đơn vận chuyển (`/api/v1`)
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| POST | `/shipments/draft` | CUSTOMER | Tạo đơn nháp (201) |
+| PUT | `/shipments/{id}/draft` | Chủ đơn | Cập nhật nháp, cần `version` |
+| POST | `/shipments/{id}/publish` | Chủ đơn | Đăng đơn |
+| POST | `/shipments/{id}/cancel` | Chủ đơn | `{reason}` |
+| DELETE | `/shipments/{id}` | Chủ đơn | Xóa mềm đơn nháp |
+| GET | `/shipments/my` | CUSTOMER | `page, size, status, keyword, fromDate, toDate, sortBy (createdAt, pickupTime, shipmentCode, totalWeightKg, status), sortDirection` |
+| GET | `/shipments/{id}` | Chủ đơn, ADMIN | Chi tiết: điểm dừng, hàng, dịch vụ, ảnh, lịch sử, cảnh báo, `actions` |
+| POST/GET | `/shipments/{id}/attachments` | Chủ đơn (POST), chủ đơn/ADMIN (GET) | Multipart `file` |
+| DELETE | `/shipments/{id}/attachments/{aid}` | Chủ đơn | |
+| GET | `/shipments/{id}/attachments/{aid}/content` | Chủ đơn, ADMIN | Nội dung ảnh |
+| GET | `/catalogs/item-categories`, `/vehicle-types`, `/vehicle-body-types`, `/shipment-services` | Đã đăng nhập | Danh mục |
+| GET | `/admin/shipments` | ADMIN | Tất cả đơn, cùng bộ lọc |
+| PATCH | `/admin/catalogs/{catalog}/{code}` | ADMIN | `{active}` |
+| POST | `/admin/catalogs/cache/evict` | ADMIN | Xóa cache danh mục |
+
+Mã đơn dạng `TG<yyMMdd>-<6 ký tự>` theo ngày giờ Việt Nam, không dùng ký tự dễ nhầm (0/O, 1/I/L), unique trong DB, sinh lại khi trùng. Thời điểm lưu UTC (`TIMESTAMPTZ`), API trả ISO-8601 `Z`; bộ lọc ngày hiểu theo `SHIPMENT_BUSINESS_ZONE` (Asia/Ho_Chi_Minh).
+
+Frontend: `/customer/shipments` (danh sách có tìm kiếm, lọc trạng thái/ngày, sắp xếp, phân trang, skeleton, trạng thái rỗng/lỗi), `/customer/shipments/create`, `/customer/shipments/:id`, `/customer/shipments/:id/edit`; admin `/admin/shipments`, `/admin/shipments/:id` (chỉ xem).
+
 ## Cơ sở dữ liệu
 
 Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_driver_vehicle_tables.sql` (V1 giữ nguyên). Flyway tự chạy khi backend khởi động; database Sprint 1 chỉ có V1 nên V2 được áp dụng tiếp.
@@ -105,6 +192,8 @@ Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_d
 | `driver_profiles` | `user_id` unique, `license_number` unique, `license_class`, `verification_status`, `rejection_reason`, `submitted_at`, `reviewed_at`, `reviewed_by` |
 | `vehicles` | `driver_id` → `driver_profiles`, `plate_number` unique, kích thước/tải trọng `CHECK > 0`, `registration_expiry_date`, trạng thái duyệt |
 | `admin_audit_logs` | `actor_id`, `action`, `target_type`, `target_id`, `details`, `created_at` |
+
+**V3** `V3__create_shipment_management_tables.sql`: `shipments` (mã đơn unique, chủ đơn, trạng thái, lịch, yêu cầu xe, tổng `NUMERIC`, giá nullable, publish/cancel/soft delete, `version`), `shipment_stops` (PICKUP/DELIVERY, `sequence_no` unique theo đơn — không giới hạn 2 điểm), `shipment_items`, `shipment_services`, `shipment_attachments` (metadata), `shipment_status_histories`, cùng các bảng danh mục và dữ liệu seed. Ràng buộc: số kiện > 0, trọng lượng ≥ 0, kích thước > 0 khi có, vĩ độ ±90, kinh độ ±180, tổng không âm, hạn giao sau giờ lấy, đơn đã đăng phải có `pickup_time ≥ published_at`, đơn hủy phải có lý do, chỉ xóa mềm đơn nháp; index theo `customer_id, created_at`, `status, pickup_time`.
 
 Mọi thời điểm là `TIMESTAMPTZ` (UTC). Có index cho email, phone, role, status, driver_id, trạng thái duyệt + `submitted_at`. Không có xóa vật lý tài khoản; vô hiệu hóa bằng `SUSPENDED/LOCKED`.
 
@@ -125,6 +214,13 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `LOGIN_RATE_LIMIT_ENABLED` | `true` | |
 | `DRIVER_LICENSE_NUMBER_PATTERN`, `DRIVER_ALLOWED_LICENSE_CLASSES` | xem trên | |
 | `ADMIN_BOOTSTRAP_EMAIL` / `_PASSWORD` / `_FULL_NAME` | rỗng | Chỉ dùng cho lệnh tạo admin |
+| `STORAGE_PROVIDER` | `none` (Compose: `minio`) | `minio` hoặc `none` |
+| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_REGION` | — / `truckgo-private` | Backend dùng; Compose lấy từ `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` |
+| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_PORT` | `truckgo_minio`, `change_me_minio_local`, `9000` | Compose; cổng chỉ bind `127.0.0.1`. Production nên tạo user riêng chỉ có quyền trên bucket thay vì dùng root |
+| `SHIPMENT_BUSINESS_ZONE` | `Asia/Ho_Chi_Minh` | Ngày trong mã đơn và bộ lọc |
+| `SHIPMENT_MIN_PICKUP_LEAD` | `15m` | Khoảng cách tối thiểu từ lúc đăng tới giờ lấy hàng |
+| `SHIPMENT_MAX_ATTACHMENT_SIZE`, `UPLOAD_MAX_FILE_SIZE`, `UPLOAD_MAX_REQUEST_SIZE` | `5MB`, `5MB`, `6MB` | Giới hạn ảnh |
+| `CATALOG_CACHE_TTL` | `1h` | TTL cache danh mục |
 
 Không commit `.env` hay secret thật.
 
@@ -161,7 +257,8 @@ cp .env.example .env          # đặt POSTGRES_PASSWORD; với prod đặt JWT_
 docker compose up --build
 ```
 
-- Frontend: http://localhost:4200 (`/login`, `/register`)
+- Frontend: http://localhost:4200 (`/login`, `/register`, `/customer/shipments`)
+- MinIO API (chỉ localhost, dùng cho công cụ): http://127.0.0.1:9000 — bucket riêng tư, ảnh chỉ đọc được qua API
 - API: http://localhost:8080/api/v1/health · Actuator: `/actuator/health` · Swagger (dev): `/swagger-ui.html`
 
 Dừng bằng `docker compose down` (tránh `-v` nếu cần giữ dữ liệu).
@@ -169,11 +266,12 @@ Dừng bằng `docker compose down` (tránh `-v` nếu cần giữ dữ liệu).
 ### Chạy riêng frontend/backend
 
 ```bash
-docker compose up -d postgres redis
+docker compose up -d postgres redis minio
 
 # backend/ (JDK 21 + Maven 3.9+)
 export APP_ENV=dev POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DB=truckgo
 export POSTGRES_USER=truckgo_app POSTGRES_PASSWORD=change_me_local_only REDIS_HOST=localhost REDIS_PORT=6379
+export STORAGE_PROVIDER=minio MINIO_ENDPOINT=http://127.0.0.1:9000 MINIO_ACCESS_KEY=truckgo_minio MINIO_SECRET_KEY=change_me_minio_local
 mvn spring-boot:run
 
 # frontend/ (Node.js 24+)
@@ -197,7 +295,7 @@ Access token chỉ ở bộ nhớ (không localStorage/sessionStorage). Khi tả
 ## Kiểm thử
 
 ```bash
-cd backend && mvn test          # unit + integration (Testcontainers PostgreSQL 17 + Redis 7, cần Docker)
+cd backend && mvn test          # unit + integration (Testcontainers PostgreSQL 17 + Redis 7 + MinIO, cần Docker)
 cd frontend && npm test         # Vitest
 cd frontend && npm run build    # production build
 docker compose config -q
@@ -207,7 +305,21 @@ Integration test tự bỏ qua nếu không có Docker (`@Testcontainers(disable
 
 Phạm vi đã kiểm thử: hash mật khẩu; đăng ký CUSTOMER/DRIVER; bỏ qua `role: ADMIN` từ client; trùng email/phone (409) và unique/check constraint ở DB; rollback user khi insert hồ sơ tài xế thất bại (trigger lỗi giả lập); Flyway V1→V2; đăng nhập email/SĐT, sai thông tin, tài khoản khóa; rate limit 429 qua Redis; cookie `HttpOnly/Secure/SameSite/Path`; refresh rotation, token đã thu hồi, phát hiện tái sử dụng, 4 luồng refresh đồng thời chỉ 1 thành công; logout; đổi mật khẩu thu hồi phiên khác; CSRF header/Origin; CORS preflight; 401/403; CUSTOMER/DRIVER bị chặn ở `/admin/**`; tài xế không đọc/sửa/gửi duyệt xe của người khác; tài xế không tự duyệt hồ sơ/xe; luồng duyệt/từ chối + audit; admin khóa người dùng. Frontend: validate form đăng ký, đăng nhập thành công/thất bại theo vai trò, interceptor gắn token / refresh dùng chung / không lặp, route guard, trang profile tải từ API, thao tác admin bị backend từ chối (403) không làm thay đổi danh sách.
 
+Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị từ chối; tổng trọng lượng/thể tích chính xác và bỏ qua giá trị client; khách A không xem/sửa/đăng/hủy/xóa đơn khách B (404); tài xế 403; admin chỉ xem; đăng thiếu dữ liệu; không đăng lại; không hủy đơn `COMPLETED`/`ASSIGNED`; không xóa đơn đã đăng; cập nhật nháp thay đúng dữ liệu con, giữ ảnh, xung đột `version`; lịch sử trạng thái; mã đơn unique (DB + retry); UTC và bộ lọc ngày giờ Việt Nam; upload sai định dạng (415), quá dung lượng (413), người khác xóa ảnh (404); object bị xóa khỏi MinIO; cache danh mục trong Redis và xóa cache; Flyway V3; các ràng buộc DB. Frontend: model form và tính tổng, wizard (kiểm tra từng bước, thêm/xóa điểm và hàng, lưu nháp, đăng đơn, sửa nháp, ánh xạ lỗi), danh sách (lọc, phân trang, lỗi, hủy), trang chi tiết, upload ảnh và lỗi.
+
 ## Giới hạn còn tồn tại
+
+**Sprint 3**
+
+- Chưa tính giá cước, phụ phí dịch vụ, khoảng cách (Sprint 4); `estimated_price`/`final_price` luôn null.
+- Chưa tích hợp bản đồ/geocoding; tọa độ do khách tự nhập hoặc để trống.
+- Đơn đã đăng không sửa được; chưa có hết hạn tự động (`EXPIRED`) — cần job ở Sprint 5.
+- Ảnh tải lên được lưu khi đơn còn nháp; ảnh của đơn đã hủy vẫn được giữ. Chưa có job dọn object mồ côi (lỗi xóa đã được log).
+- Upload đọc cả tệp vào bộ nhớ (≤ 5 MB) và giữ transaction trong lúc ghi MinIO; nếu tăng giới hạn nên chuyển sang stream/presigned upload.
+- Compose dùng tài khoản root của MinIO cho backend; production cần user/policy riêng cho bucket.
+- Chưa test giao diện bằng trình duyệt thật (E2E UI); luồng API đã được kiểm qua nginx với Compose.
+
+**Sprint 2**
 
 - Chưa xác minh email/SĐT (OTP/link) và chưa có quên mật khẩu; đăng ký trả 409 khi email/SĐT đã tồn tại (có thể bị dùng để dò tài khoản — chấp nhận cho đến khi có luồng xác minh).
 - Access token còn hiệu lực tới 15 phút sau logout (không có denylist). Tài khoản bị khóa thì bị chặn ngay.
