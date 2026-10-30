@@ -301,6 +301,24 @@ cd frontend && npm run build    # production build
 docker compose config -q
 ```
 
+### E2E giao diện (Playwright + Chromium)
+
+Bộ `frontend/e2e/` điều khiển trình duyệt trên **stack thật** (nginx, API, PostgreSQL, Redis, MinIO) — không mock. Gồm: đăng ký từ trang chủ, đăng nhập, giữ phiên khi tải lại, sai mật khẩu; wizard 5 bước (chặn bước thiếu dữ liệu, thêm/xóa điểm giao, tổng 330 kg / 2,562 m³, tải ảnh và từ chối tệp giả, cảnh báo tải trọng, dịch vụ loại trừ nhau, xác nhận không có giá), đăng đơn, tìm/lọc, hủy có lý do; sửa và xóa nháp; hỏi xác nhận khi rời trang; màn hình 390px; khách khác không xem được đơn; admin chỉ xem.
+
+```bash
+docker compose up -d --build
+# Admin cho test quyền quản trị (tuỳ chọn; thiếu thì test admin được skip)
+docker compose run --rm -e ADMIN_BOOTSTRAP_EMAIL=admin@truckgo.local -e ADMIN_BOOTSTRAP_PASSWORD='<mật khẩu>' backend --bootstrap-admin
+
+cd frontend
+npm run e2e:install          # tải Chromium cho Playwright (một lần)
+E2E_BASE_URL=http://localhost:4200 \
+E2E_ADMIN_EMAIL=admin@truckgo.local E2E_ADMIN_PASSWORD='<mật khẩu>' \
+npm run e2e                  # báo cáo HTML: npx playwright show-report
+```
+
+Test tự tạo tài khoản khách hàng với email ngẫu nhiên nên chạy lặp lại được trên cùng database; không nên chạy trên môi trường production.
+
 Integration test tự bỏ qua nếu không có Docker (`@Testcontainers(disabledWithoutDocker = true)`). Unit test mock Redis; integration test dùng Redis thật.
 
 Phạm vi đã kiểm thử: hash mật khẩu; đăng ký CUSTOMER/DRIVER; bỏ qua `role: ADMIN` từ client; trùng email/phone (409) và unique/check constraint ở DB; rollback user khi insert hồ sơ tài xế thất bại (trigger lỗi giả lập); Flyway V1→V2; đăng nhập email/SĐT, sai thông tin, tài khoản khóa; rate limit 429 qua Redis; cookie `HttpOnly/Secure/SameSite/Path`; refresh rotation, token đã thu hồi, phát hiện tái sử dụng, 4 luồng refresh đồng thời chỉ 1 thành công; logout; đổi mật khẩu thu hồi phiên khác; CSRF header/Origin; CORS preflight; 401/403; CUSTOMER/DRIVER bị chặn ở `/admin/**`; tài xế không đọc/sửa/gửi duyệt xe của người khác; tài xế không tự duyệt hồ sơ/xe; luồng duyệt/từ chối + audit; admin khóa người dùng. Frontend: validate form đăng ký, đăng nhập thành công/thất bại theo vai trò, interceptor gắn token / refresh dùng chung / không lặp, route guard, trang profile tải từ API, thao tác admin bị backend từ chối (403) không làm thay đổi danh sách.
@@ -317,7 +335,7 @@ Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị t�
 - Ảnh tải lên được lưu khi đơn còn nháp; ảnh của đơn đã hủy vẫn được giữ. Chưa có job dọn object mồ côi (lỗi xóa đã được log).
 - Upload đọc cả tệp vào bộ nhớ (≤ 5 MB) và giữ transaction trong lúc ghi MinIO; nếu tăng giới hạn nên chuyển sang stream/presigned upload.
 - Compose dùng tài khoản root của MinIO cho backend; production cần user/policy riêng cho bucket.
-- Chưa test giao diện bằng trình duyệt thật (E2E UI); luồng API đã được kiểm qua nginx với Compose.
+- E2E giao diện chỉ chạy trên Chromium và cần stack đang chạy; chưa đưa vào CI.
 
 **Sprint 2**
 
