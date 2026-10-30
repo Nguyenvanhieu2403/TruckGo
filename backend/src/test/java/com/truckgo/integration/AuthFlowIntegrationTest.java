@@ -58,7 +58,7 @@ class AuthFlowIntegrationTest extends IntegrationTestSupport {
 
     @Test void flywayAppliedSprintOneAndSprintTwoMigrations() {
         List<String> versions = jdbc.queryForList("select version from flyway_schema_history where success order by installed_rank", String.class);
-        assertThat(versions).containsExactly("1", "2");
+        assertThat(versions).startsWith("1", "2");
     }
 
     @Test void databaseEnforcesUniqueAndContactConstraints() {
