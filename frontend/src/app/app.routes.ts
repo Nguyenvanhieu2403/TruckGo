@@ -16,6 +16,15 @@ export const routes: Routes = [
     children: [
       { path: 'profile', loadComponent: () => import('./features/profile/profile.component').then(m => m.ProfileComponent) },
       { path: 'customer', canActivate: [roleGuard('CUSTOMER')], loadComponent: () => import('./features/customer/customer-home.component').then(m => m.CustomerHomeComponent) },
+      {
+        path: 'driver', canActivate: [roleGuard('DRIVER')],
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'verification' },
+          { path: 'verification', loadComponent: () => import('./features/driver/driver-verification.component').then(m => m.DriverVerificationComponent) },
+          { path: 'profile', loadComponent: () => import('./features/driver/driver-profile.component').then(m => m.DriverProfileComponent) },
+          { path: 'vehicles', loadComponent: () => import('./features/driver/driver-vehicles.component').then(m => m.DriverVehiclesComponent) },
+        ],
+      },
     ],
   },
   { path: '**', redirectTo: '' },
