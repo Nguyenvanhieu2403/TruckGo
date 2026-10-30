@@ -4,6 +4,8 @@
 node_modules/
 frontend/dist/
 frontend/.angular/
+frontend/test-results/
+frontend/playwright-report/
 backend/target/
 *.log
 .idea/
