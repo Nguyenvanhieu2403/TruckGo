@@ -77,6 +77,14 @@ app:
       max-failures-per-identifier: ${LOGIN_MAX_FAILURES:5}
       max-attempts-per-ip: ${LOGIN_MAX_ATTEMPTS_PER_IP:30}
       window: ${LOGIN_RATE_LIMIT_WINDOW:15m}
+  shipment:
+    business-zone: ${SHIPMENT_BUSINESS_ZONE:Asia/Ho_Chi_Minh}
+    min-pickup-lead: ${SHIPMENT_MIN_PICKUP_LEAD:15m}
+    max-stops: 10
+    max-items: 50
+    max-attachments: 10
+    max-attachment-size: ${SHIPMENT_MAX_ATTACHMENT_SIZE:5MB}
+    allowed-image-types: image/jpeg,image/png,image/webp
   storage:
     provider: ${STORAGE_PROVIDER:none}
     endpoint: ${MINIO_ENDPOINT:}
