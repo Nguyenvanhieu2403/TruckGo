@@ -50,6 +50,8 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/drivers/**", "/api/v1/vehicles/**").hasRole("DRIVER")
+                        // Drivers get a restricted view of published orders in Sprint 5, not these endpoints.
+                        .requestMatchers("/api/v1/shipments/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth
                         .jwt(jwt -> jwt.decoder(jwtDecoder).jwtAuthenticationConverter(converter))
