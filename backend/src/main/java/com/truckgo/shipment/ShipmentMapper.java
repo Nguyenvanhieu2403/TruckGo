@@ -33,16 +33,20 @@ public class ShipmentMapper {
 
     private final CatalogService catalogs;
     private final ShipmentPriceProvider prices;
+    /** Resolved per call: the marketplace provider is optional and must not be needed to build this mapper. */
+    private final ObjectProvider<ShipmentAssignmentProvider> assignments;
 
     @Autowired
-    public ShipmentMapper(CatalogService catalogs, ObjectProvider<ShipmentPriceProvider> prices) {
+    public ShipmentMapper(CatalogService catalogs, ObjectProvider<ShipmentPriceProvider> prices, ObjectProvider<ShipmentAssignmentProvider> assignments) {
         this.catalogs = catalogs;
         this.prices = prices.getIfAvailable(() -> id -> Optional.empty());
+        this.assignments = assignments;
     }
 
     public ShipmentMapper(CatalogService catalogs) {
         this.catalogs = catalogs;
         this.prices = id -> Optional.empty();
+        this.assignments = null;
     }
 
     public ShipmentDetail toDetail(Shipment s, List<ShipmentAttachment> attachments, List<ShipmentStatusHistory> history, boolean viewerIsOwner) {
@@ -56,7 +60,13 @@ public class ShipmentMapper {
                 stops, s.getItems().stream().map(this::item).toList(), s.getServices().stream().map(this::service).toList(),
                 attachments.stream().map(a -> attachment(s, a)).toList(),
                 history.stream().map(h -> new StatusHistoryResponse(h.getOldStatus(), h.getNewStatus(), h.getChangedBy(), h.getChangeReason(), h.getCreatedAt())).toList(),
-                warnings(s), actions(s, viewerIsOwner), s.getPublishedAt(), s.getCancelledAt(), s.getCancellationReason(), s.getCreatedAt(), s.getUpdatedAt(), s.getVersion());
+                warnings(s), actions(s, viewerIsOwner), s.getPublishedAt(), s.getCancelledAt(), s.getCancellationReason(), s.getCreatedAt(), s.getUpdatedAt(), s.getVersion(),
+                assignmentProvider().flatMap(p -> p.assignment(s)).orElse(null),
+                s.getStatus() == ShipmentStatus.DRAFT ? null : assignmentProvider().map(p -> p.applicationStats(s.getId())).orElse(null));
+    }
+
+    private Optional<ShipmentAssignmentProvider> assignmentProvider() {
+        return assignments == null ? Optional.empty() : Optional.ofNullable(assignments.getIfAvailable());
     }
 
     public ShipmentSummary toSummary(Shipment s, boolean viewerIsOwner) {

@@ -2,6 +2,7 @@ package com.truckgo.shipment.dto;
 
 import com.truckgo.catalog.ServiceValueType;
 import com.truckgo.shipment.AttachmentFileType;
+import com.truckgo.shipment.ShipmentAssignmentProvider;
 import com.truckgo.shipment.ShipmentStatus;
 import com.truckgo.shipment.StopType;
 
@@ -43,7 +44,8 @@ public final class ShipmentResponses {
                                  StopResponse pickup, StopResponse delivery, List<StopResponse> stops, List<ItemResponse> items,
                                  List<ServiceResponse> services, List<AttachmentResponse> attachments, List<StatusHistoryResponse> statusHistory,
                                  List<Warning> warnings, Actions actions, Instant publishedAt, Instant cancelledAt, String cancellationReason,
-                                 Instant createdAt, Instant updatedAt, long version) { }
+                                 Instant createdAt, Instant updatedAt, long version,
+                                 ShipmentAssignmentProvider.AssignedDriver assignment, ShipmentAssignmentProvider.ApplicationStats applications) { }
 
     public record ShipmentSummary(UUID id, String shipmentCode, ShipmentStatus status, Instant createdAt, Instant pickupTime,
                                   String pickupAddress, String deliveryAddress, int deliveryStopCount, int totalQuantity, BigDecimal totalWeightKg,

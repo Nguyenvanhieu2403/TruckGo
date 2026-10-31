@@ -105,6 +105,7 @@ class ShipmentServiceTest {
         Shipment shipment = new Shipment(codes.next(), owner);
         new ShipmentDraftAssembler(ShipmentTestData.catalogs(), new NoGeocodingProvider(), clock).apply(shipment, ShipmentTestData.validDraft());
         when(shipments.findById(shipment.getId())).thenReturn(Optional.of(shipment));
+        when(shipments.findByIdForUpdate(shipment.getId())).thenReturn(Optional.of(shipment));
         return shipment;
     }
 }

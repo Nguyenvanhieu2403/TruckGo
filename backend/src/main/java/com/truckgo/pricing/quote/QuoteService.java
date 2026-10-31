@@ -12,12 +12,14 @@ import com.truckgo.shipment.Shipment;
 import com.truckgo.shipment.ShipmentDetailsChangedEvent;
 import com.truckgo.shipment.ShipmentPriceProvider;
 import com.truckgo.shipment.ShipmentRepository;
+import com.truckgo.shipment.ShipmentListingChangedEvent;
 import com.truckgo.shipment.ShipmentStatus;
 import com.truckgo.user.UserRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Pageable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,14 +48,17 @@ public class QuoteService implements ShipmentPriceProvider {
     private final QuoteMapper mapper;
     private final AdminAuditService audit;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
-    public QuoteService(ShipmentQuoteRepository quotes, ShipmentRepository shipments, QuoteFactory factory, QuoteMapper mapper, AdminAuditService audit, Clock clock) {
+    public QuoteService(ShipmentQuoteRepository quotes, ShipmentRepository shipments, QuoteFactory factory, QuoteMapper mapper, AdminAuditService audit, Clock clock,
+                        ApplicationEventPublisher events) {
         this.quotes = quotes;
         this.shipments = shipments;
         this.factory = factory;
         this.mapper = mapper;
         this.audit = audit;
         this.clock = clock;
+        this.events = events;
     }
 
     // ------------------------------------------------------------------ customer
@@ -95,6 +100,7 @@ public class QuoteService implements ShipmentPriceProvider {
         quote.markAccepted(clock.instant());
         shipment.setEstimatedPrice(quote.getTotalPrice());
         quotes.flush();
+        events.publishEvent(new ShipmentListingChangedEvent(shipmentId));
         log.info("Quote accepted quote={} shipment={} total={}", quote.getQuoteCode(), shipmentId, quote.getTotalPrice());
         return mapper.toResponse(quote, shipment, true);
     }

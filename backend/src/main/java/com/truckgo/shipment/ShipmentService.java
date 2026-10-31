@@ -93,19 +93,23 @@ public class ShipmentService {
         shipment.markPublished(clock.instant());
         shipments.flush();
         recordStatus(shipment, previous, customerId, "Khách hàng đăng đơn");
+        events.publishEvent(new ShipmentListingChangedEvent(shipment.getId()));
         log.info("Shipment published shipmentId={}", shipment.getId());
         return detail(shipment, true);
     }
 
     @Transactional
     public ShipmentDetail cancel(UUID customerId, UUID shipmentId, String reason) {
-        Shipment shipment = requireOwned(customerId, shipmentId);
+        // Same row lock as the marketplace assignment, so a cancel and an accept of the same order serialise.
+        Shipment shipment = shipments.findByIdForUpdate(shipmentId).filter(s -> s.isOwnedBy(customerId)).orElseThrow(ShipmentService::notFound);
         if (!shipment.getStatus().isCancellableByCustomer())
             throw new ConflictException("Không thể hủy đơn ở trạng thái " + shipment.getStatus());
         ShipmentStatus previous = shipment.getStatus();
         shipment.markCancelled(clock.instant(), reason.trim());
         shipments.flush();
         recordStatus(shipment, previous, customerId, reason.trim());
+        if (previous == ShipmentStatus.PUBLISHED)
+            events.publishEvent(new ShipmentCancelledEvent(shipment.getId(), customerId, shipment.getShipmentCode(), reason.trim()));
         log.info("Shipment cancelled shipmentId={} from={}", shipment.getId(), previous);
         return detail(shipment, true);
     }
