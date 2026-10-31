@@ -102,6 +102,13 @@ app:
     max-attachments: 10
     max-attachment-size: ${SHIPMENT_MAX_ATTACHMENT_SIZE:5MB}
     allowed-image-types: image/jpeg,image/png,image/webp
+  marketplace:
+    # Drivers can apply until this long before pickup; open orders expire at the pickup time.
+    application-cutoff: ${MARKETPLACE_APPLICATION_CUTOFF:1h}
+    max-pending-per-driver: ${MARKETPLACE_MAX_PENDING_PER_DRIVER:10}
+    cache-ttl: ${MARKETPLACE_CACHE_TTL:30s}
+    expiry-interval: ${MARKETPLACE_EXPIRY_INTERVAL:5m}
+    expiry-job-enabled: ${MARKETPLACE_EXPIRY_JOB_ENABLED:true}
   storage:
     provider: ${STORAGE_PROVIDER:none}
     endpoint: ${MINIO_ENDPOINT:}

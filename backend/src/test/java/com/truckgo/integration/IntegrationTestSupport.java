@@ -97,4 +97,36 @@ abstract class IntegrationTestSupport {
     }
 
     static String bearer(Session session) { return "Bearer " + session.accessToken(); }
+
+    record DriverFixture(Session session, String profileId, String vehicleId) { }
+
+    /** Registers a driver, gets the profile and one vehicle approved by the admin. {@code vehicle} overrides the defaults. */
+    DriverFixture approvedDriver(Session admin, Map<String, Object> vehicle) throws Exception {
+        String email = uniqueEmail();
+        registerDriver(email);
+        Session driver = login(email, PASSWORD);
+        String profileId = body(mvc.perform(post("/api/v1/drivers/me/submit-verification").header("Authorization", bearer(driver)))
+                .andExpect(status().isOk()).andReturn()).at("/data/id").asText();
+        mvc.perform(post("/api/v1/admin/drivers/" + profileId + "/approve").header("Authorization", bearer(admin))).andExpect(status().isOk());
+        String vehicleId = addApprovedVehicle(admin, driver, vehicle);
+        return new DriverFixture(driver, profileId, vehicleId);
+    }
+
+    String addApprovedVehicle(Session admin, Session driver, Map<String, Object> overrides) throws Exception {
+        var vehicle = new java.util.HashMap<String, Object>(Map.of("plateNumber", uniquePlate(), "vehicleType", "SMALL_TRUCK", "maxPayloadKg", 1500,
+                "lengthCm", 420, "widthCm", 180, "heightCm", 190, "registrationExpiryDate", java.time.LocalDate.now().plusYears(1).toString()));
+        vehicle.putAll(overrides);
+        MvcResult created = null;
+        // Random plates occasionally collide across a test run; retry with a fresh one.
+        for (int attempt = 0; attempt < 5 && (created == null || created.getResponse().getStatus() == 409); attempt++) {
+            if (attempt > 0) vehicle.put("plateNumber", uniquePlate());
+            created = mvc.perform(post("/api/v1/vehicles").header("Authorization", bearer(driver)).contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(vehicle))).andReturn();
+        }
+        org.assertj.core.api.Assertions.assertThat(created.getResponse().getStatus()).isEqualTo(201);
+        String vehicleId = body(created).at("/data/id").asText();
+        mvc.perform(post("/api/v1/vehicles/" + vehicleId + "/submit-verification").header("Authorization", bearer(driver))).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/admin/vehicles/" + vehicleId + "/approve").header("Authorization", bearer(admin))).andExpect(status().isOk());
+        return vehicleId;
+    }
 }

@@ -51,6 +51,10 @@ public class Shipment {
     @Column(name = "cancelled_at") private Instant cancelledAt;
     @Column(name = "cancellation_reason") private String cancellationReason;
     @Column(name = "deleted_at") private Instant deletedAt;
+    /** Driver profile and vehicle chosen by the customer (Sprint 5); set only together with ASSIGNED. */
+    @Column(name = "assigned_driver_id") private UUID assignedDriverId;
+    @Column(name = "assigned_vehicle_id") private UUID assignedVehicleId;
+    @Column(name = "assigned_at") private Instant assignedAt;
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
     @Version private long version;
@@ -114,6 +118,11 @@ public class Shipment {
 
     public void markCancelled(Instant at, String reason) { transitionTo(ShipmentStatus.CANCELLED); cancelledAt = at; cancellationReason = reason; }
 
+    /** Nobody was chosen before the pickup time. */
+    public void markExpired() { transitionTo(ShipmentStatus.EXPIRED); }
+
+    public boolean isAssigned() { return assignedDriverId != null; }
+
     public void markDeleted(Instant at) {
         if (status != ShipmentStatus.DRAFT) throw new ConflictException("Chỉ có thể xóa đơn nháp");
         deletedAt = at;
@@ -146,6 +155,9 @@ public class Shipment {
     public Instant getPublishedAt() { return publishedAt; }
     public Instant getCancelledAt() { return cancelledAt; }
     public String getCancellationReason() { return cancellationReason; }
+    public UUID getAssignedDriverId() { return assignedDriverId; }
+    public UUID getAssignedVehicleId() { return assignedVehicleId; }
+    public Instant getAssignedAt() { return assignedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public long getVersion() { return version; }

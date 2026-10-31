@@ -49,7 +49,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/v1/drivers/**", "/api/v1/vehicles/**").hasRole("DRIVER")
+                        .requestMatchers("/api/v1/drivers/**", "/api/v1/vehicles/**", "/api/v1/driver/**").hasRole("DRIVER")
+                        .requestMatchers("/api/v1/customer/**").hasRole("CUSTOMER")
                         // Drivers get a restricted view of published orders in Sprint 5, not these endpoints.
                         .requestMatchers("/api/v1/shipments/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .anyRequest().authenticated())
