@@ -85,7 +85,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
   </main>`,
   styles: [`.detail-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px}.stop{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #eef1ea;font-size:14px}.stop .badge{min-width:82px;text-align:center;align-self:flex-start}
   .dl.compact{grid-template-columns:110px 1fr}.svc{margin:4px 0;font-size:14px}.timeline{list-style:none;padding:0;margin:0}.timeline li{display:flex;flex-direction:column;gap:2px;padding:8px 0 8px 14px;border-left:2px solid #cfe0bd;font-size:13px}
-  @media(max-width:900px){.detail-grid{grid-template-columns:1fr}}`],
+  @media(max-width:900px){.detail-grid{grid-template-columns:minmax(0,1fr)}}`],
 })
 export class ShipmentDetailComponent implements OnInit {
   readonly admin = input(false);

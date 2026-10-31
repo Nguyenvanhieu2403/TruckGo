@@ -52,3 +52,20 @@ test('the wizard fits a 390px phone screen', async ({ page }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });
+
+test('the order detail with its quote panel fits a 390px phone screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInAsNewCustomer(page, 'Khách Mobile Chi Tiết');
+  await page.goto('/customer/shipments/create');
+  await page.fill('#pickupTime', pickupLocal());
+  await fillStop(page, 0, { name: 'Kho', phone: '0912000333', province: 'Hà Nội', detail: 'Số 1' });
+  await fillStop(page, 1, { name: 'Khách', phone: '0987000333', province: 'Hà Nội', detail: 'Số 2' });
+  await button(page, 'Tiếp tục →').click();
+  await fillItem(page, 0, { name: 'Tủ lạnh hai cánh cỡ lớn', category: 'ELECTRONICS', qty: 2, kg: 95.5, size: [90, 75, 185] });
+  await button(page, 'Lưu nháp').click();
+  await expect(page).toHaveURL(/\/customer\/shipments\/[0-9a-f-]+$/);
+  await expect(page.locator('section.quote')).toBeVisible();
+  await expect(page.getByRole('cell', { name: '2,498' })).toBeVisible(); // Vietnamese decimal comma
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
