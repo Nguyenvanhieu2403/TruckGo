@@ -29,7 +29,11 @@ export const routes: Routes = [
       {
         path: 'driver', canActivate: [roleGuard('DRIVER')],
         children: [
-          { path: '', pathMatch: 'full', redirectTo: 'verification' },
+          { path: '', pathMatch: 'full', redirectTo: 'marketplace' },
+          { path: 'marketplace', loadComponent: () => import('./features/marketplace/driver-marketplace.component').then(m => m.DriverMarketplaceComponent) },
+          { path: 'marketplace/:shipmentId', loadComponent: () => import('./features/marketplace/driver-marketplace-detail.component').then(m => m.DriverMarketplaceDetailComponent) },
+          { path: 'applications', loadComponent: () => import('./features/marketplace/driver-applications.component').then(m => m.DriverApplicationsComponent) },
+          { path: 'applications/:applicationId', loadComponent: () => import('./features/marketplace/driver-application-detail.component').then(m => m.DriverApplicationDetailComponent) },
           { path: 'verification', loadComponent: () => import('./features/driver/driver-verification.component').then(m => m.DriverVerificationComponent) },
           { path: 'profile', loadComponent: () => import('./features/driver/driver-profile.component').then(m => m.DriverProfileComponent) },
           { path: 'vehicles', loadComponent: () => import('./features/driver/driver-vehicles.component').then(m => m.DriverVehiclesComponent) },
@@ -47,6 +51,7 @@ export const routes: Routes = [
           { path: 'pricing', loadComponent: () => import('./features/pricing/admin-pricing-list.component').then(m => m.AdminPricingListComponent) },
           { path: 'pricing/new', loadComponent: () => import('./features/pricing/admin-pricing-form.component').then(m => m.AdminPricingFormComponent) },
           { path: 'pricing/:id', loadComponent: () => import('./features/pricing/admin-pricing-form.component').then(m => m.AdminPricingFormComponent) },
+          { path: 'marketplace', loadComponent: () => import('./features/admin/admin-marketplace.component').then(m => m.AdminMarketplaceComponent) },
           { path: 'quotes', loadComponent: () => import('./features/pricing/admin-quotes.component').then(m => m.AdminQuotesComponent) },
         ],
       },

@@ -2,20 +2,21 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
 import { ToastContainerComponent } from './toast-container.component';
+import { NotificationBellComponent } from './notification-bell.component';
 
 interface NavItem { path: string; label: string; exact?: boolean; }
 
 const NAV: Record<string, NavItem[]> = {
   CUSTOMER: [{ path: '/customer', label: 'Tổng quan', exact: true }, { path: '/customer/shipments', label: 'Đơn vận chuyển' }, { path: '/profile', label: 'Hồ sơ' }],
-  DRIVER: [{ path: '/driver/verification', label: 'Trạng thái duyệt' }, { path: '/driver/profile', label: 'Giấy phép' }, { path: '/driver/vehicles', label: 'Phương tiện' }, { path: '/profile', label: 'Tài khoản' }],
-  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/admin/pricing', label: 'Bảng giá' }, { path: '/admin/quotes', label: 'Báo giá chờ xử lý' }, { path: '/profile', label: 'Tài khoản' }],
+  DRIVER: [{ path: '/driver/marketplace', label: 'Tìm đơn' }, { path: '/driver/applications', label: 'Yêu cầu của tôi' }, { path: '/driver/verification', label: 'Trạng thái duyệt' }, { path: '/driver/profile', label: 'Giấy phép' }, { path: '/driver/vehicles', label: 'Phương tiện' }, { path: '/profile', label: 'Tài khoản' }],
+  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/admin/marketplace', label: 'Marketplace' }, { path: '/admin/pricing', label: 'Bảng giá' }, { path: '/admin/quotes', label: 'Báo giá chờ xử lý' }, { path: '/profile', label: 'Tài khoản' }],
 };
 
 /** Layout for signed-in areas. Menu items depend on role but every API call is still authorised server-side. */
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, ToastContainerComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, ToastContainerComponent, NotificationBellComponent],
   template: `
   <div class="page">
     <header class="shell-bar">
@@ -27,6 +28,7 @@ const NAV: Record<string, NavItem[]> = {
         }
       </nav>
       <div class="shell-user">
+        <app-notification-bell />
         <span class="who">{{ auth.user()?.fullName }}<small>{{ roleLabel() }}</small></span>
         <button class="btn btn-ghost" type="button" (click)="logout()" [disabled]="loggingOut()">Đăng xuất</button>
       </div>

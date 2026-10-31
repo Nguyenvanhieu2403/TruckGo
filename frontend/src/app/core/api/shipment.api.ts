@@ -41,6 +41,11 @@ export interface ShipmentDetail {
   pickup: Stop | null; delivery: Stop | null; stops: Stop[]; items: Item[]; services: SelectedService[]; attachments: Attachment[];
   statusHistory: StatusChange[]; warnings: ShipmentWarning[]; actions: ShipmentActions;
   publishedAt: string | null; cancelledAt: string | null; cancellationReason: string | null; createdAt: string; updatedAt: string; version: number;
+  assignment: AssignedDriver | null; applications: { pending: number; total: number } | null;
+}
+export interface AssignedDriver {
+  driverId: string; fullName: string | null; phone: string | null; vehicleId: string; plateNumber: string | null; vehicleType: string | null;
+  maxPayloadKg: number | null; assignedAt: string; applicationId: string | null;
 }
 export interface ShipmentSummary {
   id: string; shipmentCode: string; status: ShipmentStatus; createdAt: string; pickupTime: string | null; pickupAddress: string | null; deliveryAddress: string | null;

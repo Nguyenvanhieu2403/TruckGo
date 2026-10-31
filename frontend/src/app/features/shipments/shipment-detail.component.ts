@@ -6,6 +6,7 @@ import { SelectedService, ShipmentApi, ShipmentDetail } from '../../core/api/shi
 import { toApiError } from '../../core/api.service';
 import { AttachmentPanelComponent } from './attachment-panel.component';
 import { QuotePanelComponent } from '../pricing/quote-panel.component';
+import { ApplicantsPanelComponent } from '../marketplace/applicants-panel.component';
 import { formatVnd } from '../../shared/money';
 import { CancelDialogComponent } from './cancel-dialog.component';
 import { SHIPMENT_STATUS_LABELS, formatKg, formatM3 } from './shipment-labels';
@@ -14,7 +15,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
 @Component({
   selector: 'app-shipment-detail',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent],
+  imports: [DatePipe, DecimalPipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent, ApplicantsPanelComponent],
   template: `
   <main class="container">
     <a [routerLink]="admin() ? '/admin/shipments' : '/customer/shipments'" class="kicker">← Danh sách đơn</a>
@@ -35,7 +36,11 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
         </div></div>
       @for (w of s.warnings; track w.code) { <div class="alert alert-warn">{{ w.message }}</div> }
       @if (s.status === 'CANCELLED') { <div class="alert alert-error">Đơn đã hủy lúc {{ s.cancelledAt | date: 'HH:mm dd/MM/yyyy' }}: {{ s.cancellationReason }}</div> }
-      @if (s.status === 'PUBLISHED') { <div class="alert alert-info">Đơn đã được đăng và đang chờ tài xế. Chức năng ghép tài xế sẽ có trong bản cập nhật tiếp theo.</div> }
+      @if (s.status === 'PUBLISHED') {
+        <div class="alert alert-info">@if (s.priceStatus === 'ACCEPTED') { Đơn đang hiển thị cho tài xế. Chọn một tài xế trong mục "Tài xế muốn nhận đơn". }
+          @else { Đơn đã đăng nhưng chưa có giá được xác nhận, nên tài xế chưa thấy đơn. Hãy xác nhận báo giá. }</div>
+      }
+      @if (s.status === 'EXPIRED') { <div class="alert alert-warn">Đơn đã hết hạn vì quá giờ lấy hàng mà chưa chọn tài xế.</div> }
       <div class="detail-grid">
         <div>
           <section class="card"><h2>Lộ trình</h2>
@@ -57,6 +62,17 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
           <app-attachment-panel [shipmentId]="s.id" [initial]="s.attachments" [editable]="s.actions.attachmentsEditable" />
         </div>
         <aside>
+          @if (s.assignment; as d) {
+            <section class="card assigned" data-testid="assigned-driver"><h2>Tài xế đã nhận</h2>
+              <dl class="dl compact"><dt>Tài xế</dt><dd><strong>{{ d.fullName || '—' }}</strong></dd>
+                <dt>Điện thoại</dt><dd>@if (d.phone) { <a [href]="'tel:' + d.phone">{{ d.phone }}</a> } @else { — }</dd>
+                <dt>Xe</dt><dd>{{ d.plateNumber }}@if (d.maxPayloadKg) { · {{ d.maxPayloadKg | number }} kg }</dd>
+                <dt>Nhận lúc</dt><dd>{{ d.assignedAt | date: 'HH:mm dd/MM/yyyy' }}</dd></dl>
+            </section>
+          }
+          @if (!admin() && s.applications && (s.status === 'PUBLISHED' || s.applications.total > 0)) {
+            <app-applicants-panel [shipmentId]="s.id" [canChoose]="s.status === 'PUBLISHED' && !s.assignment" (changed)="reload()" />
+          }
           <app-quote-panel [shipmentId]="s.id" [owner]="!admin()" [shipmentOpen]="s.status === 'DRAFT' || s.status === 'PUBLISHED'" (changed)="reload()" />
           <section class="card"><h2>Tổng quan</h2>
             <dl class="dl compact">
@@ -84,7 +100,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
     } @else if (!error()) { <p class="muted" aria-busy="true" style="margin-top:20px">Đang tải đơn…</p> }
   </main>`,
   styles: [`.detail-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px}.stop{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #eef1ea;font-size:14px}.stop .badge{min-width:82px;text-align:center;align-self:flex-start}
-  .dl.compact{grid-template-columns:110px 1fr}.svc{margin:4px 0;font-size:14px}.timeline{list-style:none;padding:0;margin:0}.timeline li{display:flex;flex-direction:column;gap:2px;padding:8px 0 8px 14px;border-left:2px solid #cfe0bd;font-size:13px}
+  .dl.compact{grid-template-columns:110px 1fr}.assigned{border-color:#8eb85a}.svc{margin:4px 0;font-size:14px}.timeline{list-style:none;padding:0;margin:0}.timeline li{display:flex;flex-direction:column;gap:2px;padding:8px 0 8px 14px;border-left:2px solid #cfe0bd;font-size:13px}
   @media(max-width:900px){.detail-grid{grid-template-columns:minmax(0,1fr)}}`],
 })
 export class ShipmentDetailComponent implements OnInit {

@@ -35,6 +35,7 @@ export function detail(overrides: Partial<ShipmentDetail> = {}): ShipmentDetail 
     attachments: [], statusHistory: [{ oldStatus: null, newStatus: 'DRAFT', changedBy: 'u-1', changeReason: 'Tạo đơn nháp', createdAt: '2026-11-01T00:00:00Z' }],
     warnings: [], actions: { editable: true, publishable: true, cancellable: true, deletable: true, attachmentsEditable: true },
     publishedAt: null, cancelledAt: null, cancellationReason: null, createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z', version: 4,
+    assignment: null, applications: null,
     ...overrides,
   };
 }
