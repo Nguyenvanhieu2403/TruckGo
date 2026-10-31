@@ -1,4 +1,4 @@
-# TruckGo — Sprint 5
+# TruckGo — Sprint 6
 
 Nền tảng kết nối khách hàng thuê xe tải với tài xế.
 
@@ -293,6 +293,61 @@ Trang danh sách Marketplace (dữ liệu chung, không có trạng thái riêng
 
 Giao diện: `/driver/marketplace`, `/driver/marketplace/:shipmentId`, `/driver/applications`, `/driver/applications/:applicationId`; khung "Tài xế muốn nhận đơn" trong chi tiết đơn của khách; `/admin/marketplace`; chuông thông báo trên thanh điều hướng (cập nhật mỗi 60s).
 
+## Thực hiện chuyến và theo dõi GPS (Sprint 6)
+
+### Vòng đời chuyến
+
+`ASSIGNED → DRIVER_ARRIVED → PICKED_UP → IN_TRANSIT → DELIVERED → COMPLETED`, mỗi lần chỉ một bước. Không có API sửa trạng thái trực tiếp: mỗi hành động có endpoint riêng (`arrived`, `pickup`, `start`, `deliver`, `confirm-delivery`), chạy dưới **khóa dòng của đơn**, lấy tài xế từ JWT, kiểm tra đúng tài xế được phân công và đúng trạng thái hiện tại, rồi chuyển qua `ShipmentStatus.canTransitionTo`. Mỗi bước ghi thời điểm (`driver_arrived_at`…`completed_at`, có CHECK ở DB), lịch sử trạng thái, vị trí nếu có, thông báo cho bên liên quan và sự kiện realtime trong cùng transaction. Mã lỗi ở `data.code`: `INVALID_TRIP_STATUS`, `STOP_OUT_OF_ORDER`, `STOPS_INCOMPLETE`, `PHOTO_REQUIRED`, `TRACKING_NOT_ACTIVE`, `LOCATION_*`, `OTP_*`.
+
+**Nhiều điểm dừng** (`shipment_stop_progress`): xử lý **đúng thứ tự** `sequence_no`. Điểm 1 (lấy hàng) gắn với `arrived`/`pickup`; các điểm giữa được xác nhận `stops/{stopId}/arrive` rồi `complete` khi đang vận chuyển; `deliver` hoàn tất điểm cuối và chỉ được phép khi mọi điểm trước đã xong. Không bỏ qua điểm (`SKIPPED` để dành cho quy trình duyệt sau này). Không tối ưu tuyến đường.
+
+**Ảnh bằng chứng** (nhận hàng, giao hàng, sự cố) đi qua cùng pipeline MinIO của Sprint 3 (nhận dạng định dạng theo nội dung, giới hạn dung lượng, key ngẫu nhiên, đọc qua API có kiểm tra quyền). Bắt buộc ảnh giao hàng hay không: `TRIP_REQUIRE_DELIVERY_PHOTO`.
+
+### GPS
+
+- Chỉ nhận vị trí khi đơn `IN_TRANSIT`, phiên chia sẻ đang `ACTIVE`, từ đúng tài xế được phân công. Phiên bắt đầu khi `start`, kết thúc khi `deliver`/`confirm-delivery`/hủy đơn; tài xế có thể tạm dừng/tiếp tục.
+- Kiểm tra: tọa độ, độ chính xác, tốc độ (km/h), hướng; thời điểm thiết bị trong khoảng `[now − TRACKING_MAX_AGE, now + TRACKING_MAX_FUTURE_SKEW]`; điểm trùng thời điểm hoặc cũ hơn điểm mới nhất bị bỏ qua (`accepted:false`); bước nhảy ngụ ý tốc độ > `TRACKING_MAX_SPEED_KMH` bị từ chối; mỗi chuyến tối đa 1 điểm/`TRACKING_MIN_INTERVAL` (Redis `SET NX PX`, mất Redis thì so với điểm cuối trong DB).
+- Lưu: **PostgreSQL** `shipment_tracking_locations` là lịch sử chính (index theo đơn và thời gian, job xóa điểm của chuyến đã kết thúc sau `TRACKING_RETENTION`); **Redis** `truckgo:trip:{id}:latest-location` chỉ giữ điểm mới nhất (TTL), mất Redis thì đọc từ DB.
+- Trạng thái hiển thị: `LIVE` (≤ `TRACKING_LIVE_THRESHOLD`), `STALE` (≤ `TRACKING_STALE_THRESHOLD`), `OFFLINE`, `PAUSED`, `NOT_STARTED`, `ENDED`. Tọa độ chỉ trả về khi đang vận chuyển và luôn kèm tuổi của điểm; sau khi giao/hoàn thành không trả vị trí. Không có ETA vì chưa có dữ liệu tuyến đường đủ tin cậy (`estimatedArrival: null`).
+- Tần suất: server trả chính sách trong mỗi phản hồi (mặc định gửi 8s/lần khi chạy, 30s khi đứng yên, chỉ khi dịch chuyển ≥ 25m hoặc đến chu kỳ). Ứng dụng web xin quyền vị trí **chỉ khi tài xế bấm "Bắt đầu chia sẻ"**, dừng khi chuyến kết thúc hoặc đăng xuất. **Trình duyệt không gửi vị trí ổn định khi chạy nền/tắt màn hình**; giao diện nói rõ điều này. Tracking nền cần ứng dụng native (ngoài phạm vi).
+
+### Realtime
+
+SSE `GET /customer/shipments/{id}/tracking/stream` (sự kiện `status`, `location`): kiểm tra quyền sở hữu khi mở luồng, chỉ gửi sự kiện của đúng đơn, heartbeat `TRACKING_HEARTBEAT`, đóng sau `TRACKING_STREAM_TIMEOUT` để client mở lại với token mới. Sự kiện phát qua **Redis Pub/Sub** sau khi commit nên chạy được nhiều instance backend; mất Redis thì chỉ phát trong instance hiện tại. Frontend mở luồng bằng `fetch` kèm `Authorization` (EventSource không gửi được header), tự kết nối lại có backoff và **polling 15s** khi luồng chưa mở. nginx không cần cấu hình riêng (backend trả `X-Accel-Buffering: no`).
+
+### Xác nhận giao hàng bằng OTP
+
+Khi tài xế `deliver`, hệ thống sinh mã 6 số bằng `SecureRandom`, chỉ lưu **HMAC-SHA256** (khóa `TRIP_OTP_SECRET`, mặc định suy ra từ `JWT_SECRET`, gắn với id của lượt xác nhận), hết hạn sau `TRIP_OTP_TTL`, khóa sau `TRIP_OTP_MAX_ATTEMPTS` lần sai (lần sai được ghi lại kể cả khi request lỗi), gửi lại sau `TRIP_OTP_RESEND_COOLDOWN`, tối đa `TRIP_OTP_MAX_SENDS` lần. Không API nào trả mã. Mã được gửi qua `OtpSender`: mặc định **in-app** (thông báo riêng của khách hàng). Nội dung thông báo bị **xóa mã** ngay khi mã được dùng, bị thay hoặc hết hạn. Production nên thêm adapter SMS/Zalo bằng cách cài `OtpSender` và đặt `TRIP_OTP_CHANNEL`. Hiện chưa có adapter SMS.
+
+### Sự cố
+
+Tài xế báo sự cố (loại, mô tả, ảnh, vị trí) từ khi được phân công đến khi giao xong; khách hàng xem sự cố của đơn mình; ADMIN lọc theo loại/trạng thái/thời gian và chuyển `OPEN → IN_PROGRESS → RESOLVED/CANCELLED` (bắt buộc ghi chú khi đóng, có audit, thông báo khách và tài xế). Báo sự cố **không** tự hủy đơn hay đổi tài xế.
+
+### Bản đồ
+
+`MAP_PROVIDER` (frontend) là abstraction cho Google Maps/Mapbox. Chưa cấu hình key nên mặc định không vẽ bản đồ: hiển thị danh sách vị trí/điểm dừng thật và link "Xem bản đồ"/"Chỉ đường" mở Google Maps ngoài ứng dụng. Không tạo tọa độ giả; điểm dừng không có tọa độ chỉ hiện địa chỉ.
+
+### API chuyến đi (`/api/v1`)
+
+| Method | Endpoint | Vai trò | Mô tả |
+|---|---|---|---|
+| GET | `/driver/trips` | DRIVER | `view=ACTIVE\|UPCOMING\|COMPLETED\|INCIDENT\|ALL`, `status`, `fromDate`, `toDate`, `keyword`, `page`, `size` |
+| GET | `/driver/trips/{id}` | DRIVER | Chi tiết, liên hệ, báo giá, điểm dừng, bước tiếp theo |
+| POST | `/driver/trips/{id}/arrived\|pickup\|start\|deliver` | DRIVER | `{latitude, longitude, note, attachments}` (tùy chọn) |
+| POST | `/driver/trips/{id}/stops/{stopId}/arrive\|complete` | DRIVER | Điểm dừng trung gian theo thứ tự |
+| POST | `/driver/trips/{id}/location` | DRIVER | `{latitude, longitude, accuracy, speed, heading, recordedAt}` |
+| POST | `/driver/trips/{id}/tracking/pause\|resume` | DRIVER | Tạm dừng/tiếp tục chia sẻ |
+| POST | `/driver/trips/{id}/photos?purpose=PICKUP_PHOTO\|DELIVERY_PHOTO\|INCIDENT_PHOTO` | DRIVER | Multipart `file` |
+| GET/POST | `/driver/trips/{id}/incidents` | DRIVER | Xem / báo sự cố |
+| GET | `/driver/trips/{id}/tracking/history` | DRIVER | Lịch sử hành trình |
+| GET | `/customer/shipments/{id}/trip`, `/tracking`, `/tracking/history`, `/tracking/stream`, `/incidents` | CUSTOMER (chủ đơn) | Theo dõi |
+| POST | `/customer/shipments/{id}/confirm-delivery` | CUSTOMER | `{otp, note}` |
+| POST | `/customer/shipments/{id}/delivery-otp/resend` | CUSTOMER | Gửi lại mã |
+| GET | `/admin/trips/{id}`, `/admin/trips/{id}/tracking/history` | ADMIN | Theo dõi |
+| GET/PATCH | `/admin/incidents`, `/admin/incidents/{id}` | ADMIN | Lọc / cập nhật `{status, note}` |
+
+Giao diện: `/driver/trips`, `/driver/trips/:id`, `/driver/trips/:id/navigation`, `/driver/trips/:id/incidents`, `/customer/shipments/:id/tracking`, `/admin/incidents`, `/admin/incidents/:id`.
+
 ## Cơ sở dữ liệu
 
 Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_driver_vehicle_tables.sql` (V1 giữ nguyên). Flyway tự chạy khi backend khởi động; database Sprint 1 chỉ có V1 nên V2 được áp dụng tiếp.
@@ -344,6 +399,18 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `MARKETPLACE_MAX_PENDING_PER_DRIVER` | `10` | Số yêu cầu đang chờ tối đa của một tài xế |
 | `MARKETPLACE_CACHE_TTL` | `30s` | TTL cache danh sách Marketplace |
 | `MARKETPLACE_EXPIRY_INTERVAL` | `5m` | Chu kỳ job chuyển đơn quá hạn sang `EXPIRED` |
+| `TRIP_OTP_TTL` / `TRIP_OTP_MAX_ATTEMPTS` | `30m` / `5` | Hạn mã xác nhận, số lần nhập sai trước khi khóa |
+| `TRIP_OTP_RESEND_COOLDOWN` / `TRIP_OTP_MAX_SENDS` | `60s` / `5` | Chờ giữa hai lần gửi, số lần gửi tối đa |
+| `TRIP_OTP_SECRET` | (từ `JWT_SECRET`) | Khóa HMAC của mã đã lưu |
+| `TRIP_OTP_CHANNEL` | `in-app` | Kênh gửi mã (`OtpSender`) |
+| `TRIP_REQUIRE_DELIVERY_PHOTO` / `TRIP_MAX_PHOTOS` | `false` / `20` | Bắt buộc ảnh giao hàng, số ảnh tối đa mỗi chuyến |
+| `TRACKING_MIN_INTERVAL` | `3s` | Khoảng cách tối thiểu giữa hai điểm GPS của một chuyến |
+| `TRACKING_LIVE_THRESHOLD` / `TRACKING_STALE_THRESHOLD` | `60s` / `5m` | Ngưỡng LIVE / STALE (sau đó OFFLINE) |
+| `TRACKING_MAX_FUTURE_SKEW` / `TRACKING_MAX_AGE` | `2m` / `10m` | Lệch giờ thiết bị chấp nhận được |
+| `TRACKING_MAX_SPEED_KMH` | `200` | Bước nhảy nhanh hơn bị từ chối |
+| `TRACKING_MOVING_INTERVAL` / `TRACKING_IDLE_INTERVAL` / `TRACKING_MIN_DISTANCE_METERS` | `8s` / `30s` / `25` | Chính sách gửi cho ứng dụng tài xế |
+| `TRACKING_LATEST_TTL` / `TRACKING_RETENTION` | `30m` / `90d` | TTL điểm mới nhất trong Redis, thời gian giữ lịch sử GPS của chuyến đã kết thúc |
+| `TRACKING_STREAM_TIMEOUT` / `TRACKING_HEARTBEAT` | `10m` / `20s` | Vòng đời và heartbeat của luồng SSE |
 
 Không commit `.env` hay secret thật.
 
@@ -444,7 +511,8 @@ Test tự tạo tài khoản khách hàng với email ngẫu nhiên nên chạy 
 
 - Định giá (`pricing.spec.ts`, `pricing-ui.spec.ts`): cần tài khoản admin. Mỗi spec tạm tắt bảng giá đang bật của một loại xe (1 tấn, 1,5 tấn), tự tạo bảng giá riêng và **bật lại bảng giá gốc khi kết thúc**, nên chạy được cả trên stack có bảng giá thật/mẫu. `pricing-ui.spec.ts` kiểm tra phân tích giá với phụ phí đêm và cuối tuần khớp số tính tay (640.175 VNĐ), từ chối/lịch sử, điều chỉnh giảm giá và xác nhận, sửa đơn sau khi xác nhận, định dạng số tiếng Việt và hiển thị 390px.
 - Marketplace (`marketplace.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 2,5 tấn rồi bật lại khi xong. Tạo đơn có giá đã xác nhận, hai tài xế được duyệt; kiểm tra lọc theo khu vực không dấu, ẩn địa chỉ trước khi được chọn, gửi yêu cầu có xác nhận, khách nhận thông báo và chọn một tài xế, tài xế được chọn thấy địa chỉ, tài xế còn lại "Không được chọn", admin thấy lịch sử phân công, màn hình 390px.
-- Mỗi lượt chạy đăng nhập khoảng 40 lần từ cùng một IP. Với stack dành cho E2E, đặt `LOGIN_MAX_ATTEMPTS_PER_IP` cao (CI dùng 1000) để không bị chặn 429 khi chạy lặp; giữ giá trị mặc định cho môi trường thật.
+- Chuyến đi (`trips.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 3,5 tấn rồi bật lại. Dùng **GPS giả lập của Chromium** (quyền `geolocation`): tài xế làm từng bước, bấm chia sẻ vị trí, khách thấy vị trí LIVE qua luồng SSE sau nginx và thấy vị trí mới khi xe di chuyển; báo sự cố và admin xử lý; nhập sai rồi đúng OTP (đọc từ hộp thông báo của khách) để hoàn thành.
+- Mỗi lượt chạy đăng nhập khoảng 50 lần từ cùng một IP. Với stack dành cho E2E, đặt `LOGIN_MAX_ATTEMPTS_PER_IP` cao (CI dùng 1000) để không bị chặn 429 khi chạy lặp; giữ giá trị mặc định cho môi trường thật.
 
 Integration test tự bỏ qua nếu không có Docker (`@Testcontainers(disabledWithoutDocker = true)`). Unit test mock Redis; integration test dùng Redis thật.
 
@@ -456,7 +524,19 @@ Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khu
 
 Sprint 5 thêm: unit test điều kiện xe (duyệt, đăng kiểm, hạng xe, xoay kiện, thể tích, đông lạnh/container) và bộ lọc Marketplace; integration test luồng đầy đủ, 6 lượt chọn đồng thời, các mã lỗi, quyền sở hữu/vai trò, rút/từ chối, hủy và hết hạn đóng yêu cầu, thông báo, admin, xóa cache; frontend (danh sách/chi tiết Marketplace, khung chọn tài xế, chuông thông báo) và E2E Marketplace.
 
+Sprint 6 thêm: unit test chuyển trạng thái, điểm dừng, tọa độ, OTP (HMAC, khóa, hết hạn), trạng thái LIVE/STALE/OFFLINE/PAUSED/ENDED; integration test luồng ASSIGNED → COMPLETED với ảnh và GPS (PostgreSQL, Redis), giới hạn tần suất/trùng/nhảy vị trí/thời gian, quyền tài xế/khách/admin, OTP sai/khóa/gửi lại/hết hạn, điểm dừng theo thứ tự, mất Redis, sự cố có audit, luồng SSE chỉ của đúng đơn; frontend (danh sách/chi tiết chuyến, chia sẻ vị trí, theo dõi, OTP, sự cố) và E2E chuyến đi.
+
 ## Giới hạn còn tồn tại
+
+**Sprint 6**
+
+- Chưa có adapter SMS/Zalo cho OTP; kênh mặc định là thông báo trong ứng dụng của chính khách hàng (mã chỉ đọc được khi còn hiệu lực). Người nhận khác chủ đơn chưa nhận được mã.
+- Bản đồ chưa vẽ trong ứng dụng (cần key Google Maps/Mapbox cho trình duyệt và một `MapProvider`); hiện dùng danh sách + link mở Google Maps.
+- Web không gửi GPS khi chạy nền/tắt màn hình; tracking nền cần app native. Không có ETA.
+- Chưa có quy trình bỏ qua điểm dừng, hủy/đổi tài xế khi đang chạy chuyến, hay xử lý giao thất bại ngoài việc báo sự cố.
+- Kiểm tra vị trí ở mức hợp lý (thời gian, thứ tự, tốc độ nhảy) — không chống được thiết bị bị giả lập GPS chủ đích.
+- Mỗi instance giữ luồng SSE trong bộ nhớ; scale ngang cần Redis (đã có Pub/Sub) và sticky không bắt buộc.
+
 
 **Sprint 5**
 
