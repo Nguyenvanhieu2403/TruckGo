@@ -77,6 +77,18 @@ app:
       max-failures-per-identifier: ${LOGIN_MAX_FAILURES:5}
       max-attempts-per-ip: ${LOGIN_MAX_ATTEMPTS_PER_IP:30}
       window: ${LOGIN_RATE_LIMIT_WINDOW:15m}
+  maps:
+    # Geocoding seam from Sprint 3 (only "none" exists).
+    provider: none
+    # Road distance for pricing: none (admin enters a verified distance) or google.
+    route-provider: ${MAPS_ROUTE_PROVIDER:none}
+    max-reasonable-km: ${MAPS_MAX_REASONABLE_KM:3000}
+    google:
+      # Never commit a key; set GOOGLE_MAPS_API_KEY in the environment.
+      api-key: ${GOOGLE_MAPS_API_KEY:}
+      base-url: ${GOOGLE_DIRECTIONS_URL:https://maps.googleapis.com/maps/api/directions/json}
+      connect-timeout: ${MAPS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${MAPS_READ_TIMEOUT:5s}
   catalog:
     cache-ttl: ${CATALOG_CACHE_TTL:1h}
   shipment:
