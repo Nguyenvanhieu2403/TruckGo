@@ -136,6 +136,12 @@ public class GlobalExceptionHandler {
         return response(HttpStatus.METHOD_NOT_ALLOWED, "Phương thức không được hỗ trợ", request);
     }
 
+    /** A client closed a long-lived response (e.g. a trip event stream): nothing can or should be written back. */
+    @ExceptionHandler(org.springframework.web.context.request.async.AsyncRequestNotUsableException.class)
+    public void disconnected(org.springframework.web.context.request.async.AsyncRequestNotUsableException ex, HttpServletRequest request) {
+        log.debug("Client disconnected path={}", request.getRequestURI());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> unexpected(Exception ex, HttpServletRequest request) {
         log.error("Unhandled request error path={}", request.getRequestURI(), ex);
