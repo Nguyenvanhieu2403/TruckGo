@@ -56,7 +56,7 @@ import { ToastService } from '../../shared/toast.service';
               <input id="adjustmentAmount" type="number" step="1000" formControlName="adjustmentAmount" />
               @if (err('adjustmentAmount'); as e) { <span class="error">{{ e }}</span> }</div>
           </div>
-          <div class="field" [class.invalid]="err('reason')"><label for="reason">Lý do (bắt buộc, được lưu vào nhật ký)</label>
+          <div class="field" [class.invalid]="err('reason')"><label for="reason">Lý do (bắt buộc; khách hàng sẽ thấy và được lưu vào nhật ký)</label>
             <textarea id="reason" rows="2" maxlength="500" formControlName="reason"></textarea>
             @if (err('reason'); as e) { <span class="error">{{ e }}</span> }</div>
           @if (formError()) { <div class="alert alert-error" role="alert">{{ formError() }}</div> }
