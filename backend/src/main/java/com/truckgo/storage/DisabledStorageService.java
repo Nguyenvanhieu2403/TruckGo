@@ -9,4 +9,5 @@ public class DisabledStorageService implements StorageService {
     @Override public void put(String key, InputStream data, long size, String contentType) { throw new StorageUnavailableException(MESSAGE, null); }
     @Override public InputStream get(String key) { throw new StorageUnavailableException(MESSAGE, null); }
     @Override public void delete(String key) { throw new StorageUnavailableException(MESSAGE, null); }
+    @Override public java.util.List<StoredObject> list(String prefix, String startAfter, int max) { return java.util.List.of(); }
 }

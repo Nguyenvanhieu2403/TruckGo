@@ -3,13 +3,18 @@ package com.truckgo.storage;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.MinioClient;
+import io.minio.Result;
+import io.minio.messages.Item;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * MinIO / S3 adapter. The bucket is created private (no anonymous policy) and objects are only ever streamed through
@@ -49,6 +54,23 @@ public class MinioStorageService implements StorageService {
     @Override public void delete(String key) {
         try { client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key).build()); }
         catch (Exception ex) { throw unavailable("delete", ex); }
+    }
+
+    @Override public List<StoredObject> list(String prefix, String startAfter, int max) {
+        try {
+            ListObjectsArgs.Builder args = ListObjectsArgs.builder().bucket(bucket).prefix(prefix).recursive(true).maxKeys(Math.min(max, 1000));
+            if (startAfter != null) args.startAfter(startAfter);
+            List<StoredObject> objects = new ArrayList<>();
+            for (Result<Item> result : client.listObjects(args.build())) {
+                Item item = result.get();
+                if (item.isDir()) continue;
+                objects.add(new StoredObject(item.objectName(), item.lastModified() == null ? null : item.lastModified().toInstant(), item.size()));
+                if (objects.size() >= max) break;
+            }
+            return objects;
+        } catch (Exception ex) {
+            throw unavailable("list", ex);
+        }
     }
 
     private void ensureBucket() throws Exception {
