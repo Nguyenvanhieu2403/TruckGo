@@ -53,8 +53,31 @@ public class ShipmentAttachmentService {
     public AttachmentResponse upload(UUID customerId, UUID shipmentId, MultipartFile file) {
         Shipment shipment = shipments.requireOwned(customerId, shipmentId);
         if (!shipment.getStatus().isEditable()) throw new ConflictException("Chỉ có thể thêm ảnh khi đơn ở trạng thái nháp");
-        if (attachments.countByShipmentId(shipmentId) >= properties.maxAttachments())
+        if (attachments.countByShipmentIdAndFileType(shipmentId, AttachmentFileType.GOODS_PHOTO) >= properties.maxAttachments())
             throw new ConflictException("Mỗi đơn tối đa " + properties.maxAttachments() + " ảnh");
+        return mapper.attachment(shipment, store(shipment, file, AttachmentFileType.GOODS_PHOTO, customerId));
+    }
+
+    /**
+     * Stores a proof photo taken by the assigned driver. The trip module checks the driver, the trip state and its own
+     * per-trip limit before calling this; the file checks are the same as for goods photos.
+     */
+    @Transactional
+    public ShipmentAttachment storeTripPhoto(Shipment shipment, MultipartFile file, AttachmentFileType type, UUID driverUserId) {
+        if (!type.isTripPhoto()) throw new IllegalArgumentException("Loại ảnh không hợp lệ");
+        return store(shipment, file, type, driverUserId);
+    }
+
+    /** Opens any photo of an order for a caller the trip module has already authorised. */
+    @Transactional(readOnly = true)
+    public Content openAuthorised(UUID shipmentId, UUID attachmentId) {
+        ShipmentAttachment attachment = attachments.findByIdAndShipmentId(attachmentId, shipmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy tệp đính kèm"));
+        return new Content(attachment.getFileName(), attachment.getContentType(), attachment.getFileSize(), storage.get(attachment.getFileKey()));
+    }
+
+    private ShipmentAttachment store(Shipment shipment, MultipartFile file, AttachmentFileType fileType, UUID uploader) {
+        UUID shipmentId = shipment.getId();
         if (file == null || file.isEmpty()) throw invalid("Tệp rỗng");
         if (file.getSize() > properties.maxAttachmentSize().toBytes())
             throw new FieldErrorException(HttpStatus.PAYLOAD_TOO_LARGE, "Tệp vượt quá dung lượng cho phép",
@@ -72,9 +95,9 @@ public class ShipmentAttachmentService {
         storage.put(key, new ByteArrayInputStream(bytes), bytes.length, type.mimeType());
         try {
             ShipmentAttachment saved = attachments.saveAndFlush(new ShipmentAttachment(attachmentId, shipmentId, displayName(file.getOriginalFilename(), type.extension()),
-                    key, type.mimeType(), bytes.length, AttachmentFileType.GOODS_PHOTO, customerId));
-            log.info("Attachment uploaded shipmentId={} attachmentId={} size={}", shipmentId, attachmentId, bytes.length);
-            return mapper.attachment(shipment, saved);
+                    key, type.mimeType(), bytes.length, fileType, uploader));
+            log.info("Attachment uploaded shipmentId={} attachmentId={} type={} size={}", shipmentId, attachmentId, fileType, bytes.length);
+            return saved;
         } catch (RuntimeException ex) {
             cleanup.deleteNow(List.of(key)); // compensate: never keep an object without metadata
             throw ex;

@@ -156,7 +156,7 @@ public class ShipmentService {
     }
 
     private ShipmentDetail detail(Shipment shipment, boolean owner) {
-        return mapper.toDetail(shipment, attachments.findByShipmentIdOrderByCreatedAt(shipment.getId()),
+        return mapper.toDetail(shipment, attachments.findByShipmentIdAndFileTypeOrderByCreatedAt(shipment.getId(), AttachmentFileType.GOODS_PHOTO),
                 history.findByShipmentIdOrderByCreatedAtAsc(shipment.getId()), owner);
     }
 

@@ -109,6 +109,32 @@ app:
     cache-ttl: ${MARKETPLACE_CACHE_TTL:30s}
     expiry-interval: ${MARKETPLACE_EXPIRY_INTERVAL:5m}
     expiry-job-enabled: ${MARKETPLACE_EXPIRY_JOB_ENABLED:true}
+  trip:
+    # Delivery confirmation code: validity, wrong guesses before lock, wait and limit for new codes.
+    otp-ttl: ${TRIP_OTP_TTL:30m}
+    otp-max-attempts: ${TRIP_OTP_MAX_ATTEMPTS:5}
+    otp-resend-cooldown: ${TRIP_OTP_RESEND_COOLDOWN:60s}
+    otp-max-sends: ${TRIP_OTP_MAX_SENDS:5}
+    # HMAC key for stored codes; blank = derived from JWT_SECRET.
+    otp-secret: ${TRIP_OTP_SECRET:}
+    # in-app (notification inbox). An SMS adapter implementing OtpSender can be added for production.
+    otp-channel: ${TRIP_OTP_CHANNEL:in-app}
+    require-delivery-photo: ${TRIP_REQUIRE_DELIVERY_PHOTO:false}
+    max-trip-photos: ${TRIP_MAX_PHOTOS:20}
+  tracking:
+    min-interval: ${TRACKING_MIN_INTERVAL:3s}
+    live-threshold: ${TRACKING_LIVE_THRESHOLD:60s}
+    stale-threshold: ${TRACKING_STALE_THRESHOLD:5m}
+    max-future-skew: ${TRACKING_MAX_FUTURE_SKEW:2m}
+    max-age: ${TRACKING_MAX_AGE:10m}
+    max-speed-kmh: ${TRACKING_MAX_SPEED_KMH:200}
+    moving-interval: ${TRACKING_MOVING_INTERVAL:8s}
+    idle-interval: ${TRACKING_IDLE_INTERVAL:30s}
+    min-distance-meters: ${TRACKING_MIN_DISTANCE_METERS:25}
+    latest-ttl: ${TRACKING_LATEST_TTL:30m}
+    retention: ${TRACKING_RETENTION:90d}
+    stream-timeout: ${TRACKING_STREAM_TIMEOUT:10m}
+    heartbeat: ${TRACKING_HEARTBEAT:20s}
   storage:
     provider: ${STORAGE_PROVIDER:none}
     endpoint: ${MINIO_ENDPOINT:}

@@ -10,4 +10,8 @@ public interface ShipmentAttachmentRepository extends JpaRepository<ShipmentAtta
     List<ShipmentAttachment> findByShipmentIdOrderByCreatedAt(UUID shipmentId);
     Optional<ShipmentAttachment> findByIdAndShipmentId(UUID id, UUID shipmentId);
     long countByShipmentId(UUID shipmentId);
+    long countByShipmentIdAndFileType(UUID shipmentId, AttachmentFileType fileType);
+    long countByShipmentIdAndFileTypeNot(UUID shipmentId, AttachmentFileType fileType);
+    List<ShipmentAttachment> findByShipmentIdAndFileTypeOrderByCreatedAt(UUID shipmentId, AttachmentFileType fileType);
+    List<ShipmentAttachment> findByShipmentIdAndFileTypeNotOrderByCreatedAt(UUID shipmentId, AttachmentFileType fileType);
 }

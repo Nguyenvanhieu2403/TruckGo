@@ -19,6 +19,11 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     Optional<Notification> findByIdAndRecipientUserId(UUID id, UUID recipientUserId);
     List<Notification> findByReferenceIdOrderByCreatedAtAsc(UUID referenceId);
 
+    /** Replaces the text of notifications of one type about one object, e.g. to remove a used one-time code. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "UPDATE notifications SET content = :content WHERE notification_type = :type AND reference_id = :referenceId AND content <> :content", nativeQuery = true)
+    int redact(@Param("type") String type, @Param("referenceId") UUID referenceId, @Param("content") String content);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update Notification n set n.read = true, n.readAt = :now where n.recipientUserId = :userId and n.read = false")
     int markAllRead(@Param("userId") UUID userId, @Param("now") Instant now);

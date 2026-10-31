@@ -279,7 +279,7 @@ class ShipmentIntegrationTest extends IntegrationTestSupport {
         send(post("/api/v1/shipments/" + id + "/publish"), session, null).andExpect(status().isOk());
         // Orders past PUBLISHED always carry a driver and vehicle (chk_shipments_assignment).
         DriverFixture driver = approvedDriver(newAdmin(), Map.of());
-        jdbc.update("update shipments set status = 'COMPLETED', assigned_driver_id = ?::uuid, assigned_vehicle_id = ?::uuid, assigned_at = now() where id = ?::uuid",
+        jdbc.update("update shipments set status = 'COMPLETED', assigned_driver_id = ?::uuid, assigned_vehicle_id = ?::uuid, assigned_at = now(), completed_at = now() where id = ?::uuid",
                 driver.profileId(), driver.vehicleId(), id);
         send(post("/api/v1/shipments/" + id + "/cancel"), session, Map.of("reason", "Muốn hủy đơn đã xong")).andExpect(status().isConflict());
         jdbc.update("update shipments set status = 'ASSIGNED' where id = ?::uuid", id);

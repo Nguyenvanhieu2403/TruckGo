@@ -55,6 +55,12 @@ public class Shipment {
     @Column(name = "assigned_driver_id") private UUID assignedDriverId;
     @Column(name = "assigned_vehicle_id") private UUID assignedVehicleId;
     @Column(name = "assigned_at") private Instant assignedAt;
+    /** Trip milestones (Sprint 6); each is set exactly when the order enters that status. */
+    @Column(name = "driver_arrived_at") private Instant driverArrivedAt;
+    @Column(name = "picked_up_at") private Instant pickedUpAt;
+    @Column(name = "in_transit_at") private Instant inTransitAt;
+    @Column(name = "delivered_at") private Instant deliveredAt;
+    @Column(name = "completed_at") private Instant completedAt;
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
     @Version private long version;
@@ -123,6 +129,14 @@ public class Shipment {
 
     public boolean isAssigned() { return assignedDriverId != null; }
 
+    public boolean isAssignedTo(UUID driverId) { return assignedDriverId != null && assignedDriverId.equals(driverId); }
+
+    public void markDriverArrived(Instant at) { transitionTo(ShipmentStatus.DRIVER_ARRIVED); driverArrivedAt = at; }
+    public void markPickedUp(Instant at) { transitionTo(ShipmentStatus.PICKED_UP); pickedUpAt = at; }
+    public void markInTransit(Instant at) { transitionTo(ShipmentStatus.IN_TRANSIT); inTransitAt = at; }
+    public void markDelivered(Instant at) { transitionTo(ShipmentStatus.DELIVERED); deliveredAt = at; }
+    public void markCompleted(Instant at) { transitionTo(ShipmentStatus.COMPLETED); completedAt = at; }
+
     public void markDeleted(Instant at) {
         if (status != ShipmentStatus.DRAFT) throw new ConflictException("Chỉ có thể xóa đơn nháp");
         deletedAt = at;
@@ -158,6 +172,11 @@ public class Shipment {
     public UUID getAssignedDriverId() { return assignedDriverId; }
     public UUID getAssignedVehicleId() { return assignedVehicleId; }
     public Instant getAssignedAt() { return assignedAt; }
+    public Instant getDriverArrivedAt() { return driverArrivedAt; }
+    public Instant getPickedUpAt() { return pickedUpAt; }
+    public Instant getInTransitAt() { return inTransitAt; }
+    public Instant getDeliveredAt() { return deliveredAt; }
+    public Instant getCompletedAt() { return completedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public long getVersion() { return version; }
