@@ -147,17 +147,26 @@ Cache: JSON trong Redis, key `catalog:v1:*`, TTL `CATALOG_CACHE_TTL` (mặc đ�
 
 ### Ảnh hàng hóa và lưu trữ
 
-- `StorageService` (put/get/delete) với `MinioStorageService` (MinIO Java SDK, mọi endpoint S3) và `DisabledStorageService` khi `STORAGE_PROVIDER=none` — lúc đó upload trả **503**, không giả thành công.
+- `StorageService` (put/get/delete/list) với `MinioStorageService` (MinIO Java SDK, mọi endpoint S3) và `DisabledStorageService` khi `STORAGE_PROVIDER=none` — lúc đó upload trả **503**, không giả thành công.
 - Chỉ chủ đơn, chỉ khi `DRAFT`, tối đa 10 ảnh/đơn, 5 MB/ảnh (413). Định dạng xác định bằng **magic bytes** (JPEG/PNG/WebP), không dựa vào tên hay Content-Type (sai → 415).
 - Object key do máy chủ sinh: `shipments/{shipmentId}/{uuid}.{ext}`; tên tệp gốc chỉ làm tên hiển thị đã làm sạch, không bao giờ dùng làm đường dẫn.
-- Bucket riêng tư, tạo tự động; ảnh được trả qua `GET /shipments/{id}/attachments/{aid}/content` sau khi kiểm tra quyền (`Cache-Control: private`, `nosniff`). Client không thấy endpoint, bucket, key hay credential MinIO.
-- Upload: ghi object rồi lưu metadata; lưu metadata lỗi → xóa object. Xóa: xóa metadata, xóa object sau commit; lỗi xóa object được log kèm key để dọn sau.
+- Bucket riêng tư; ảnh được trả qua `GET /shipments/{id}/attachments/{aid}/content` sau khi kiểm tra quyền (`Cache-Control: private`, `nosniff`). Client không thấy endpoint, bucket, key hay credential MinIO.
+- **Upload theo stream, không giữ transaction**: (1) kiểm tra quyền/trạng thái/số ảnh trong transaction chỉ đọc; (2) đọc 16 byte đầu để kiểm tra magic bytes rồi stream phần còn lại thẳng lên MinIO (không đọc cả tệp vào bộ nhớ, không giữ kết nối DB hay khóa dòng); (3) khóa dòng đơn, **kiểm tra lại** (đơn có thể vừa được đăng/hủy, ảnh thứ 11 từ tab khác) rồi ghi metadata. Bước 3 lỗi → xóa object ngay; nếu MinIO cũng lỗi → đưa vào hàng đợi xóa; nếu cả DB lỗi → job dọn object mồ côi sẽ tìm thấy. Ảnh chuyến đi (Sprint 6) dùng chung pipeline.
+- **Hàng đợi xóa** (`storage_deletion_tasks`): xóa ảnh, xóa nháp, **hủy đơn** (ảnh hàng hóa của đơn bị hủy được xóa metadata và đưa vào hàng đợi), bù trừ upload lỗi, object mồ côi. Task được ghi **trong cùng transaction** với thay đổi DB nên rollback thì không xóa gì; sau commit thử xóa ngay, lỗi thì job (`STORAGE_CLEANUP_RETRY_INTERVAL`) thử lại với backoff 1, 2, 4… phút (tối đa 6 giờ/lần, `STORAGE_CLEANUP_MAX_ATTEMPTS` lần rồi `FAILED` + log ERROR). Trước khi xóa luôn kiểm tra không còn dòng ảnh nào trỏ tới key (`SKIPPED` nếu còn). Nhiều instance dùng `SKIP LOCKED`, không xử lý trùng.
+- **Dọn object mồ côi** (`OrphanObjectSweeper`, mỗi `STORAGE_ORPHAN_INTERVAL`): chỉ xét key dưới `shipments/`, chỉ object cũ hơn `STORAGE_ORPHAN_MIN_AGE` (mặc định 24h, không đụng upload đang diễn ra); hỏi DB thất bại → dừng, **không coi lỗi là "không có metadata"**; nếu hơn 50% một lô trông như mồ côi → dừng và log ERROR (dấu hiệu trỏ nhầm DB/bucket); tối đa `STORAGE_ORPHAN_MAX_DELETES` object mỗi lượt, quét tiếp từ vị trí lần trước; MinIO lỗi → bỏ lượt, lượt sau thử lại. **Mặc định dry-run** (`STORAGE_ORPHAN_DRY_RUN=true`): chỉ log key sẽ xóa; đặt `false` sau khi kiểm tra log.
+- **Tài khoản MinIO**: service `minio-init` (chạy một lần bằng root) tạo bucket riêng tư, policy `truckgo-app` (chỉ `GetObject/PutObject/DeleteObject/ListBucket…` trên đúng bucket) và user ứng dụng `MINIO_APP_ACCESS_KEY`/`MINIO_APP_SECRET_KEY`. Backend **chỉ nhận user ứng dụng**, không có quyền quản trị, không tạo được bucket khác hay mở bucket public (đã kiểm chứng bằng `mc`). Policy: `infra/minio/truckgo-app-policy.json`. Production dùng cùng policy với MinIO/S3 riêng của bạn.
 - nginx cho phép body tới 6 MB trên `/api/` (mặc định 1 MB sẽ chặn ảnh).
 - Image MinIO chính thức không còn tải được từ Docker Hub/quay.io; Compose và Testcontainers dùng bản build MinIO của Chainguard, pin theo digest.
 
-### Bản đồ
+### Bản đồ và geocoding
 
-`GeocodingProvider` là điểm nối cho Google Maps/Mapbox/OpenStreetMap. Mặc định `app.maps.provider=none`: nhập địa chỉ thủ công, tọa độ chỉ lưu khi người dùng nhập (cả vĩ độ và kinh độ, trong phạm vi hợp lệ) — **không tự đoán tọa độ**. `full_address` được ghép từ các phần có cấu trúc; tọa độ lưu riêng cho Sprint 4.
+`GeocodingProvider` (package `geo`) có hai thao tác: `search` (gợi ý địa chỉ) và `geocode` (điền tọa độ). Có sẵn `none` (mặc định) và `google` (Google Geocoding API, giới hạn `country:VN`, ngôn ngữ `vi`); Mapbox/OpenStreetMap chỉ cần thêm một lớp cài interface này và một nhánh trong `GeoConfig`.
+
+- `MAPS_GEOCODING_PROVIDER=none`: ô tìm địa chỉ ẩn, giao diện ghi rõ "nhập địa chỉ thủ công"; mọi chức năng tạo đơn chạy như cũ.
+- `MAPS_GEOCODING_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` (bật **Geocoding API** cho key; dùng chung key với Directions của Sprint 4): bước Địa điểm có ô "Tìm địa chỉ trên bản đồ"/"Dùng địa chỉ đã nhập", hiện gợi ý kèm độ chính xác và tọa độ. Chọn gợi ý chỉ điền **tọa độ**, không sửa các ô địa chỉ đã gõ; nếu điểm đã có tọa độ khác, hỏi xác nhận trước khi thay.
+- Kết quả được kiểm tra: tọa độ hợp lệ, không phải (0,0), nằm trong vùng phục vụ (`MAPS_SERVICE_MIN/MAX_LAT/LNG`, mặc định Việt Nam). Khi lưu đơn, điểm **chưa có tọa độ** chỉ được tự điền nếu nhà cung cấp trả về **kết quả chính xác, khớp toàn bộ** (không `APPROXIMATE`, không `partial_match`); không tìm thấy, khớp một phần hoặc nhà cung cấp lỗi → để trống. Tọa độ người dùng nhập không bao giờ bị ghi đè.
+- Kết quả được cache Redis (`MAPS_GEOCODING_CACHE_TTL`, key là hash của địa chỉ); mỗi người dùng tối đa `MAPS_GEOCODING_SEARCHES_PER_MINUTE` lượt tìm/phút để bảo vệ key. Key không bao giờ được ghi log hay trả về client.
+- API: `GET /api/v1/geo/status` → `{provider, enabled}`; `GET /api/v1/geo/search?q=&limit=` → gợi ý; `503 GEOCODING_DISABLED` khi chưa cấu hình, `503 GEOCODING_UNAVAILABLE` khi nhà cung cấp lỗi (kèm hướng dẫn nhập thủ công). Cần đăng nhập.
 
 ### API đơn vận chuyển (`/api/v1`)
 
@@ -399,6 +408,14 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `MARKETPLACE_MAX_PENDING_PER_DRIVER` | `10` | Số yêu cầu đang chờ tối đa của một tài xế |
 | `MARKETPLACE_CACHE_TTL` | `30s` | TTL cache danh sách Marketplace |
 | `MARKETPLACE_EXPIRY_INTERVAL` | `5m` | Chu kỳ job chuyển đơn quá hạn sang `EXPIRED` |
+| `MAPS_GEOCODING_PROVIDER` | `none` | `google` bật tìm địa chỉ/geocoding (cần `GOOGLE_MAPS_API_KEY`) |
+| `MAPS_CONNECT_TIMEOUT` / `MAPS_READ_TIMEOUT` | `3s` / `5s` | Timeout gọi Google (Directions và Geocoding) |
+| `MAPS_GEOCODING_CACHE_TTL` / `MAPS_GEOCODING_SEARCHES_PER_MINUTE` | `24h` / `30` | Cache kết quả, giới hạn lượt tìm mỗi người dùng |
+| `MAPS_SERVICE_MIN_LAT` … `MAPS_SERVICE_MAX_LNG` | Việt Nam | Vùng phục vụ; kết quả ngoài vùng bị loại |
+| `MINIO_APP_ACCESS_KEY` / `MINIO_APP_SECRET_KEY` | `truckgo_app` / (đổi) | User MinIO của ứng dụng (tạo bởi `minio-init`), backend chỉ dùng user này |
+| `STORAGE_CLEANUP_RETRY_INTERVAL` / `STORAGE_CLEANUP_MAX_ATTEMPTS` | `1m` / `20` | Chu kỳ và số lần thử lại xóa object |
+| `STORAGE_ORPHAN_DRY_RUN` | `true` | Dọn object mồ côi chỉ ghi log cho tới khi đặt `false` |
+| `STORAGE_ORPHAN_MIN_AGE` / `STORAGE_ORPHAN_INTERVAL` / `STORAGE_ORPHAN_MAX_DELETES` | `24h` / `6h` / `100` | Tuổi tối thiểu, chu kỳ, số object tối đa mỗi lượt |
 | `TRIP_OTP_TTL` / `TRIP_OTP_MAX_ATTEMPTS` | `30m` / `5` | Hạn mã xác nhận, số lần nhập sai trước khi khóa |
 | `TRIP_OTP_RESEND_COOLDOWN` / `TRIP_OTP_MAX_SENDS` | `60s` / `5` | Chờ giữa hai lần gửi, số lần gửi tối đa |
 | `TRIP_OTP_SECRET` | (từ `JWT_SECRET`) | Khóa HMAC của mã đã lưu |
@@ -493,7 +510,7 @@ docker compose config -q
 
 ### E2E giao diện (Playwright + Chromium)
 
-Bộ `frontend/e2e/` điều khiển trình duyệt trên **stack thật** (nginx, API, PostgreSQL, Redis, MinIO) — không mock. Gồm: đăng ký từ trang chủ, đăng nhập, giữ phiên khi tải lại, sai mật khẩu; wizard 5 bước (chặn bước thiếu dữ liệu, thêm/xóa điểm giao, tổng 330 kg / 2,562 m³, tải ảnh và từ chối tệp giả, cảnh báo tải trọng, dịch vụ loại trừ nhau, xác nhận không có giá), đăng đơn, tìm/lọc, hủy có lý do; sửa và xóa nháp; hỏi xác nhận khi rời trang; màn hình 390px; khách khác không xem được đơn; admin chỉ xem.
+Bộ `frontend/e2e/` chạy **trong CI** (job E2E của `.github/workflows/ci.yml`: dựng stack Compose dùng một lần với mật khẩu ngẫu nhiên, Flyway chạy khi backend khởi động, cài Chromium, lưu báo cáo Playwright + screenshot/trace khi lỗi, `docker compose down -v` khi kết thúc; không dùng database thật nào). Bộ test điều khiển trình duyệt trên **stack thật** (nginx, API, PostgreSQL, Redis, MinIO) — không mock. Gồm: đăng ký từ trang chủ, đăng nhập, giữ phiên khi tải lại, sai mật khẩu; wizard 5 bước (chặn bước thiếu dữ liệu, thêm/xóa điểm giao, tổng 330 kg / 2,562 m³, tải ảnh và từ chối tệp giả, cảnh báo tải trọng, dịch vụ loại trừ nhau, xác nhận không có giá), đăng đơn, tìm/lọc, hủy có lý do; sửa và xóa nháp; hỏi xác nhận khi rời trang; màn hình 390px; khách khác không xem được đơn; admin chỉ xem.
 
 ```bash
 docker compose up -d --build
@@ -512,6 +529,7 @@ Test tự tạo tài khoản khách hàng với email ngẫu nhiên nên chạy 
 - Định giá (`pricing.spec.ts`, `pricing-ui.spec.ts`): cần tài khoản admin. Mỗi spec tạm tắt bảng giá đang bật của một loại xe (1 tấn, 1,5 tấn), tự tạo bảng giá riêng và **bật lại bảng giá gốc khi kết thúc**, nên chạy được cả trên stack có bảng giá thật/mẫu. `pricing-ui.spec.ts` kiểm tra phân tích giá với phụ phí đêm và cuối tuần khớp số tính tay (640.175 VNĐ), từ chối/lịch sử, điều chỉnh giảm giá và xác nhận, sửa đơn sau khi xác nhận, định dạng số tiếng Việt và hiển thị 390px.
 - Marketplace (`marketplace.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 2,5 tấn rồi bật lại khi xong. Tạo đơn có giá đã xác nhận, hai tài xế được duyệt; kiểm tra lọc theo khu vực không dấu, ẩn địa chỉ trước khi được chọn, gửi yêu cầu có xác nhận, khách nhận thông báo và chọn một tài xế, tài xế được chọn thấy địa chỉ, tài xế còn lại "Không được chọn", admin thấy lịch sử phân công, màn hình 390px.
 - Chuyến đi (`trips.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 3,5 tấn rồi bật lại. Dùng **GPS giả lập của Chromium** (quyền `geolocation`): tài xế làm từng bước, bấm chia sẻ vị trí, khách thấy vị trí LIVE qua luồng SSE sau nginx và thấy vị trí mới khi xe di chuyển; báo sự cố và admin xử lý; nhập sai rồi đúng OTP (đọc từ hộp thông báo của khách) để hoàn thành.
+- Ảnh (`photo-lifecycle.spec.ts`): hủy đơn có ảnh → ảnh biến mất trên giao diện, API danh sách rỗng và link nội dung cũ trả 404; bước Địa điểm báo "nhập địa chỉ thủ công" khi chưa cấu hình bản đồ; API geocoding không mở cho người chưa đăng nhập.
 - Mỗi lượt chạy đăng nhập khoảng 50 lần từ cùng một IP. Với stack dành cho E2E, đặt `LOGIN_MAX_ATTEMPTS_PER_IP` cao (CI dùng 1000) để không bị chặn 429 khi chạy lặp; giữ giá trị mặc định cho môi trường thật.
 
 Integration test tự bỏ qua nếu không có Docker (`@Testcontainers(disabledWithoutDocker = true)`). Unit test mock Redis; integration test dùng Redis thật.
@@ -523,6 +541,8 @@ Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị t�
 Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khung giờ qua đêm, làm tròn, giá tối thiểu, điều chỉnh âm, dữ liệu không hợp lệ) và provider Google (nhiều chặng, lỗi, timeout, không lộ key); integration test định giá (ví dụ 360.000, tổng khớp chi tiết, không có/hết hạn bảng giá, provider lỗi → ADMIN nhập quãng đường có audit, quyền truy cập, hết hạn, đã xác nhận không đổi, sửa đơn thay thế báo giá, đồng thời, đổi bảng giá không ảnh hưởng báo giá cũ, validation/trùng thời gian, cache); frontend (panel báo giá, form bảng giá, xử lý báo giá) và E2E luồng định giá.
 
 Sprint 5 thêm: unit test điều kiện xe (duyệt, đăng kiểm, hạng xe, xoay kiện, thể tích, đông lạnh/container) và bộ lọc Marketplace; integration test luồng đầy đủ, 6 lượt chọn đồng thời, các mã lỗi, quyền sở hữu/vai trò, rút/từ chối, hủy và hết hạn đóng yêu cầu, thông báo, admin, xóa cache; frontend (danh sách/chi tiết Marketplace, khung chọn tài xế, chuông thông báo) và E2E Marketplace.
+
+Hoàn thiện Sprint 3 thêm: unit test geocoding (Google thành công/không kết quả/lỗi/key bị từ chối, chỉ kết quả chính xác mới điền tọa độ, không ghi đè tọa độ người dùng, kết quả ngoài vùng bị loại, không có provider), job dọn mồ côi (giữ object mới/có metadata, dry-run, DB lỗi không xóa, ngưỡng an toàn, giới hạn mỗi lượt), backoff hàng đợi; integration test trên PostgreSQL + MinIO thật: hủy đơn xóa ảnh sau commit và giữ nguyên khi rollback, MinIO lỗi rồi thử lại tới khi xóa xong, DB lỗi sau upload không để lại object, MinIO lỗi khi upload trả 503, ảnh 4,9 MB qua stream, quyền truy cập, giới hạn 10 ảnh, quét mồ côi chỉ xóa object không ai tham chiếu, API geocoding khi chưa cấu hình; frontend ô tìm địa chỉ; E2E vòng đời ảnh.
 
 Sprint 6 thêm: unit test chuyển trạng thái, điểm dừng, tọa độ, OTP (HMAC, khóa, hết hạn), trạng thái LIVE/STALE/OFFLINE/PAUSED/ENDED; integration test luồng ASSIGNED → COMPLETED với ảnh và GPS (PostgreSQL, Redis), giới hạn tần suất/trùng/nhảy vị trí/thời gian, quyền tài xế/khách/admin, OTP sai/khóa/gửi lại/hết hạn, điểm dừng theo thứ tự, mất Redis, sự cố có audit, luồng SSE chỉ của đúng đơn; frontend (danh sách/chi tiết chuyến, chia sẻ vị trí, theo dõi, OTP, sự cố) và E2E chuyến đi.
 
@@ -563,11 +583,11 @@ Sprint 6 thêm: unit test chuyển trạng thái, điểm dừng, tọa độ, O
 
 - Chưa tính giá cước, phụ phí dịch vụ, khoảng cách (Sprint 4); `estimated_price`/`final_price` luôn null.
 - Chưa tích hợp bản đồ/geocoding; tọa độ do khách tự nhập hoặc để trống.
-- Đơn đã đăng không sửa được; chưa có hết hạn tự động (`EXPIRED`) — cần job ở Sprint 5.
-- Ảnh tải lên được lưu khi đơn còn nháp; ảnh của đơn đã hủy vẫn được giữ. Chưa có job dọn object mồ côi (lỗi xóa đã được log).
-- Upload đọc cả tệp vào bộ nhớ (≤ 5 MB) và giữ transaction trong lúc ghi MinIO; nếu tăng giới hạn nên chuyển sang stream/presigned upload.
-- Compose dùng tài khoản root của MinIO cho backend; production cần user/policy riêng cho bucket.
-- E2E giao diện chỉ chạy trên Chromium và cần stack đang chạy; chưa đưa vào CI.
+- Đơn đã đăng không sửa được (hết hạn tự động đã có từ Sprint 5).
+- Bản đồ chỉ có Google; Mapbox/OSM cần thêm adapter. Gợi ý địa chỉ dùng Geocoding API (không phải Places Autocomplete theo từng phím gõ) để hạn chế chi phí; người dùng bấm "Tìm".
+- Ảnh vẫn đi qua backend (stream, không presigned upload) để giữ nguyên kiểm tra quyền, magic bytes và metadata trước khi chấp nhận.
+- Ảnh của đơn đã hủy bị xóa ngay (không có thời gian lưu giữ để khiếu nại); cần thì thêm độ trễ vào hàng đợi.
+- E2E chỉ chạy Chromium (đã chạy trong CI trên stack Compose dùng một lần).
 
 **Sprint 2**
 
