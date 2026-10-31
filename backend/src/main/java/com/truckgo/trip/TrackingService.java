@@ -73,7 +73,8 @@ public class TrackingService {
     }
 
     public TrackingPolicy policy() {
-        return new TrackingPolicy(properties.movingInterval().toSeconds(), properties.idleInterval().toSeconds(), properties.minDistanceMeters());
+        return new TrackingPolicy(properties.movingInterval().toSeconds(), properties.idleInterval().toSeconds(), properties.minDistanceMeters(),
+                properties.maxAge().toSeconds());
     }
 
     // ------------------------------------------------------------------ driver side
@@ -90,9 +91,18 @@ public class TrackingService {
             throw BusinessRuleException.conflict(TripErrors.TRACKING_NOT_ACTIVE, "Bạn đang tạm dừng chia sẻ vị trí");
 
         Instant now = clock.instant();
-        Instant recordedAt = request.recordedAt().toInstant();
-        if (recordedAt.isAfter(now.plus(properties.maxFutureSkew())) || recordedAt.isBefore(now.minus(properties.maxAge())))
-            throw TripErrors.unprocessable(TripErrors.LOCATION_INVALID_TIME, "Thời điểm ghi nhận vị trí không hợp lệ, hãy kiểm tra đồng hồ thiết bị");
+        Instant recordedAt = fixTime(request, now);
+        if (recordedAt.isAfter(now.plus(properties.maxFutureSkew()))) {
+            log.info("GPS fix refused: device time ahead by {}s shipment={}", Duration.between(now, recordedAt).toSeconds(), shipmentId);
+            throw TripErrors.unprocessable(TripErrors.LOCATION_INVALID_TIME, "Giờ trên thiết bị nhanh hơn giờ hệ thống khoảng "
+                    + minutes(Duration.between(now, recordedAt)) + ", hãy kiểm tra đồng hồ thiết bị");
+        }
+        if (recordedAt.isBefore(now.minus(properties.maxAge()))) {
+            log.info("GPS fix refused: fix {}s old (ageMsSent={}) shipment={}", Duration.between(recordedAt, now).toSeconds(), request.ageMs() != null, shipmentId);
+            // An old fix is never stored as the current position; the device has to produce a fresh one.
+            throw TripErrors.unprocessable(TripErrors.LOCATION_TOO_OLD, "Thiết bị gửi vị trí đã cũ khoảng " + minutes(Duration.between(recordedAt, now))
+                    + "; hãy đợi thiết bị xác định vị trí mới (bật Wi-Fi/định vị chính xác)");
+        }
         GeoFix fix = new GeoFix(request.latitude(), request.longitude());
 
         Optional<Latest> previous = latest(shipmentId);
@@ -217,6 +227,20 @@ public class TrackingService {
         if (!Boolean.TRUE.equals(first))
             throw new BusinessRuleException(HttpStatus.TOO_MANY_REQUESTS, TripErrors.LOCATION_RATE_LIMITED, "Gửi vị trí quá dày, vui lòng giảm tần suất",
                     Map.of("retryAfterSeconds", Math.max(properties.minInterval().toSeconds(), 1)));
+    }
+
+    /**
+     * Dates a fix by the server's clock from its age when the device sends one, so a wrong device clock does not
+     * matter; otherwise trusts the device timestamp (then checked against the allowed window).
+     */
+    static Instant fixTime(LocationRequest request, Instant now) {
+        if (request.ageMs() != null) return now.minusMillis(request.ageMs()).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        return request.recordedAt().toInstant();
+    }
+
+    private static String minutes(Duration d) {
+        long s = Math.abs(d.toSeconds());
+        return s < 120 ? s + " giây" : s < 7200 ? (s / 60) + " phút" : (s / 3600) + " giờ";
     }
 
     private LocationAck ack(boolean accepted, String reason, Instant recordedAt) { return new LocationAck(accepted, reason, recordedAt, policy()); }

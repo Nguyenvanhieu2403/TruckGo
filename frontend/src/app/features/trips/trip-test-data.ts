@@ -16,7 +16,7 @@ export function driverTrip(overrides: Partial<DriverTrip> = {}): DriverTrip {
     customerNote: null, stops: [stop(1, 'PICKUP', 'PENDING', true), stop(2, 'DELIVERY')], items: [], services: [], quote: null,
     milestones: { assignedAt: '2026-11-01T00:00:00Z', driverArrivedAt: null, pickedUpAt: null, inTransitAt: null, deliveredAt: null, completedAt: null },
     statusHistory: [], photos: [], nextAction: 'ARRIVE_PICKUP', nextStopId: null, trackingAllowed: false, trackingSession: null,
-    trackingPolicy: { movingIntervalSeconds: 8, idleIntervalSeconds: 30, minDistanceMeters: 25 }, deliveryPhotoRequired: false, awaitingCustomerConfirmation: false, openIncidents: 0,
+    trackingPolicy: { movingIntervalSeconds: 8, idleIntervalSeconds: 30, minDistanceMeters: 25, maxAgeSeconds: 600 }, deliveryPhotoRequired: false, awaitingCustomerConfirmation: false, openIncidents: 0,
     ...overrides,
   };
 }

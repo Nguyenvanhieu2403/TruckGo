@@ -23,7 +23,7 @@ export interface StopProgress {
 export interface Photo { id: string; fileType: PhotoPurpose | 'GOODS_PHOTO'; fileName: string; fileSize: number; createdAt: string; contentUrl: string; }
 export interface TripVehicle { id: string; plateNumber: string; vehicleType: VehicleType; maxPayloadKg: number | null; }
 export interface Milestones { assignedAt: string | null; driverArrivedAt: string | null; pickedUpAt: string | null; inTransitAt: string | null; deliveredAt: string | null; completedAt: string | null; }
-export interface TrackingPolicy { movingIntervalSeconds: number; idleIntervalSeconds: number; minDistanceMeters: number; }
+export interface TrackingPolicy { movingIntervalSeconds: number; idleIntervalSeconds: number; minDistanceMeters: number; maxAgeSeconds: number; }
 /** Coordinates come only from real fixes; state says how old they are. */
 export interface Tracking {
   state: TrackingState; session: 'ACTIVE' | 'PAUSED' | 'ENDED' | null; latitude: number | null; longitude: number | null; accuracy: number | null;
@@ -53,7 +53,8 @@ export interface CustomerTrip {
   estimatedArrival: string | null; confirmation: Confirmation | null; openIncidents: number;
 }
 export interface MilestonePayload { latitude?: number | null; longitude?: number | null; note?: string | null; attachments?: string[]; }
-export interface LocationPayload { latitude: number; longitude: number; accuracy: number | null; speed: number | null; heading: number | null; recordedAt: string; }
+/** ageMs: how old the fix is by the device clock; the server dates the fix from it, so a wrong device clock does not matter. */
+export interface LocationPayload { latitude: number; longitude: number; accuracy: number | null; speed: number | null; heading: number | null; recordedAt: string; ageMs: number; }
 export interface IncidentPayload { type: IncidentType; description: string; latitude?: number | null; longitude?: number | null; attachments?: string[]; }
 
 export const INCIDENT_TYPE_LABELS: Record<IncidentType, string> = {

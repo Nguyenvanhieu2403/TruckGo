@@ -333,6 +333,26 @@ class TripIntegrationTest extends IntegrationTestSupport {
         assertThat(view.at("/stops/1/progressNote").asText()).isEqualTo("Đã giao điểm 2");
     }
 
+    @Test void fixesAreDatedByTheirAgeSoAWrongDeviceClockDoesNotMatter() throws Exception {
+        Trip trip = assignedTrip(1);
+        driverAction(trip, "arrived", Map.of()).andExpect(status().isOk());
+        driverAction(trip, "pickup", Map.of()).andExpect(status().isOk());
+        driverAction(trip, "start", Map.of()).andExpect(status().isOk());
+        String path = "/api/v1/driver/trips/" + trip.id() + "/location";
+        // The device clock is three hours behind, but the fix itself is 2 s old: accepted and dated by the server.
+        send(post(path), trip.driver().session(), Map.of("latitude", 21.0285, "longitude", 105.8542, "recordedAt", now().minusHours(3).toString(), "ageMs", 2000))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.accepted").value(true)).andExpect(jsonPath("$.data.policy.maxAgeSeconds").value(600));
+        JsonNode t = data(send(get("/api/v1/customer/shipments/" + trip.id() + "/tracking"), trip.customer(), null));
+        assertThat(t.get("state").asText()).isEqualTo("LIVE");
+        assertThat(t.get("ageSeconds").asLong()).isBetween(0L, 10L);
+        // A fix the device itself says is 15 minutes old is refused, never shown as current.
+        clearRateLimit(trip);
+        send(post(path), trip.driver().session(), Map.of("latitude", 21.0286, "longitude", 105.8543, "recordedAt", now().toString(), "ageMs", 900_000))
+                .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.data.code").value("LOCATION_TOO_OLD"));
+        send(post(path), trip.driver().session(), Map.of("latitude", 21.0286, "longitude", 105.8543, "recordedAt", now().toString(), "ageMs", -5))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test void staleAndPausedLocationsAreNeverShownAsLive() throws Exception {
         Trip trip = assignedTrip(1);
         driverAction(trip, "arrived", Map.of()).andExpect(status().isOk());

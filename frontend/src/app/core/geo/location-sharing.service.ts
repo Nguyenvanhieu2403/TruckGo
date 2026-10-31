@@ -26,7 +26,7 @@ export class LocationSharingService {
   readonly lastAccuracy = signal<number | null>(null);
   readonly shipmentId = signal<string | null>(null);
   private watchId: number | null = null;
-  private policy: TrackingPolicy = { movingIntervalSeconds: 8, idleIntervalSeconds: 30, minDistanceMeters: 25 };
+  private policy: TrackingPolicy = { movingIntervalSeconds: 8, idleIntervalSeconds: 30, minDistanceMeters: 25, maxAgeSeconds: 600 };
   private last: { latitude: number; longitude: number; at: number } | null = null;
   private pausedUntil = 0;
   private inFlight = false;
@@ -66,6 +66,13 @@ export class LocationSharingService {
     const id = this.shipmentId();
     if (!id || this.inFlight || Date.now() < this.pausedUntil) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    // Some browsers (Safari on macOS in particular) hand back the last fix the OS had, with its original time. An old
+    // fix is not the current position: do not send it, tell the driver, and wait for a fresh one.
+    const ageMs = Math.max(Date.now() - p.timestamp, 0);
+    if (ageMs > this.policy.maxAgeSeconds * 1000) {
+      this.message.set(staleMessage(ageMs));
+      return;
+    }
     const point = { latitude: p.coords.latitude, longitude: p.coords.longitude };
     const moving = (p.coords.speed ?? 0) >= MOVING_MS;
     const interval = (moving ? this.policy.movingIntervalSeconds : this.policy.idleIntervalSeconds) * 1000;
@@ -79,7 +86,7 @@ export class LocationSharingService {
       latitude: round(point.latitude), longitude: round(point.longitude), accuracy: p.coords.accuracy ?? null,
       speed: p.coords.speed === null ? null : Math.round(p.coords.speed * 3.6 * 100) / 100,   // m/s → km/h
       heading: p.coords.heading === null || Number.isNaN(p.coords.heading) ? null : p.coords.heading % 360,
-      recordedAt: new Date(p.timestamp).toISOString(),
+      recordedAt: new Date(p.timestamp).toISOString(), ageMs: Math.round(ageMs),
     }).subscribe({
       next: ack => {
         this.inFlight = false;
@@ -92,6 +99,8 @@ export class LocationSharingService {
         const err = toApiError(e);
         if (err.status === 429) { this.pausedUntil = Date.now() + 5000; return; }
         if (err.code === 'TRACKING_NOT_ACTIVE' || err.status === 404) { this.message.set(err.message); this.stop(); return; }
+        // Keep the fix as the reference point so the same old reading is not sent again on every callback.
+        if (err.code === 'LOCATION_TOO_OLD' || err.code === 'LOCATION_INVALID_TIME') this.last = { ...point, at: p.timestamp };
         this.message.set(err.message);
       },
     });
@@ -111,3 +120,9 @@ export class LocationSharingService {
 }
 
 function round(v: number): number { return Math.round(v * 1e6) / 1e6; }
+
+function staleMessage(ageMs: number): string {
+  const minutes = Math.round(ageMs / 60_000);
+  return `Thiết bị chưa có vị trí mới (vị trí gần nhất từ khoảng ${minutes} phút trước) nên chưa gửi cho khách hàng. `
+    + 'Hãy bật Wi-Fi và định vị chính xác, hoặc dùng điện thoại có GPS; vị trí sẽ được gửi khi thiết bị cập nhật.';
+}

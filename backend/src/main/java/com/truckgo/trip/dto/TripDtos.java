@@ -39,13 +39,18 @@ public final class TripDtos {
         public List<UUID> attachmentIds() { return attachments == null ? List.of() : attachments; }
     }
 
-    /** speed in km/h, heading in degrees clockwise from north, accuracy in metres. */
+    /**
+     * speed in km/h, heading in degrees clockwise from north, accuracy in metres. ageMs (optional, preferred) is how
+     * old the fix is by the device's own clock; the server then dates the fix by its clock, so a device whose clock is
+     * set wrong still reports correctly. recordedAt is used when ageMs is absent.
+     */
     public record LocationRequest(@NotNull(message = "Thiếu vĩ độ") @DecimalMin(value = "-90", message = "Vĩ độ phải trong khoảng -90 đến 90") @DecimalMax(value = "90", message = "Vĩ độ phải trong khoảng -90 đến 90") BigDecimal latitude,
                                   @NotNull(message = "Thiếu kinh độ") @DecimalMin(value = "-180", message = "Kinh độ phải trong khoảng -180 đến 180") @DecimalMax(value = "180", message = "Kinh độ phải trong khoảng -180 đến 180") BigDecimal longitude,
                                   @DecimalMin(value = "0", message = "Độ chính xác không được âm") @DecimalMax(value = "100000", message = "Độ chính xác không hợp lệ") BigDecimal accuracy,
                                   @DecimalMin(value = "0", message = "Tốc độ không được âm") @DecimalMax(value = "300", message = "Tốc độ không hợp lệ") BigDecimal speed,
                                   @DecimalMin(value = "0", message = "Hướng phải từ 0 đến dưới 360") @DecimalMax(value = "360", inclusive = false, message = "Hướng phải từ 0 đến dưới 360") BigDecimal heading,
-                                  @NotNull(message = "Thiếu thời điểm ghi nhận") OffsetDateTime recordedAt) { }
+                                  @NotNull(message = "Thiếu thời điểm ghi nhận") OffsetDateTime recordedAt,
+                                  @jakarta.validation.constraints.PositiveOrZero(message = "Tuổi của vị trí không hợp lệ") Long ageMs) { }
 
     public record ConfirmDeliveryRequest(@NotBlank(message = "Nhập mã xác nhận") @Pattern(regexp = "\\d{6}", message = "Mã xác nhận gồm 6 chữ số") String otp,
                                          @Size(max = 500, message = "Ghi chú tối đa 500 ký tự") String note) { }
@@ -85,7 +90,7 @@ public final class TripDtos {
     public record TrackingPoint(BigDecimal latitude, BigDecimal longitude, BigDecimal accuracy, BigDecimal speed, BigDecimal heading, Instant recordedAt) { }
 
     /** What the driver app should do: send interval while moving/idle and the minimum movement worth sending. */
-    public record TrackingPolicy(long movingIntervalSeconds, long idleIntervalSeconds, int minDistanceMeters) { }
+    public record TrackingPolicy(long movingIntervalSeconds, long idleIntervalSeconds, int minDistanceMeters, long maxAgeSeconds) { }
 
     public record LocationAck(boolean accepted, String reason, Instant recordedAt, TrackingPolicy policy) { }
 

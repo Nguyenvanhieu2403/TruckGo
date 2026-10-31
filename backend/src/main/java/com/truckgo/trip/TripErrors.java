@@ -16,6 +16,7 @@ public final class TripErrors {
     public static final String OTP_RESEND_LIMIT = "OTP_RESEND_LIMIT";
     public static final String TRACKING_NOT_ACTIVE = "TRACKING_NOT_ACTIVE";
     public static final String LOCATION_INVALID_TIME = "LOCATION_INVALID_TIME";
+    public static final String LOCATION_TOO_OLD = "LOCATION_TOO_OLD";
     public static final String LOCATION_IMPLAUSIBLE = "LOCATION_IMPLAUSIBLE";
     public static final String LOCATION_RATE_LIMITED = "LOCATION_RATE_LIMITED";
 
