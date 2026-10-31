@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, input, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Observable } from 'rxjs';
 import { SelectedService, ShipmentApi, ShipmentDetail } from '../../core/api/shipment.api';
@@ -14,7 +14,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
 @Component({
   selector: 'app-shipment-detail',
   standalone: true,
-  imports: [DatePipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent],
+  imports: [DatePipe, DecimalPipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent],
   template: `
   <main class="container">
     <a [routerLink]="admin() ? '/admin/shipments' : '/customer/shipments'" class="kicker">← Danh sách đơn</a>
@@ -50,7 +50,8 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
             <div class="table-wrap"><table class="table"><thead><tr><th>Tên</th><th>Loại</th><th>SL</th><th>Kg/kiện</th><th>Kích thước</th><th>Tổng kg</th><th>m³</th></tr></thead>
               <tbody>@for (i of s.items; track i.id) {
                 <tr><td>{{ i.itemName }}@if (i.description) { <br><span class="muted">{{ i.description }}</span> }</td><td>{{ i.categoryName }}</td><td>{{ i.quantity }}</td>
-                  <td>{{ i.weightPerUnitKg }}</td><td>{{ i.lengthCm ? i.lengthCm + '×' + i.widthCm + '×' + i.heightCm + ' cm' : '—' }}</td><td>{{ i.totalWeightKg }}</td><td>{{ i.totalVolumeM3 ?? '—' }}</td></tr>
+                  <td>{{ i.weightPerUnitKg | number: '1.0-2' }}</td><td>{{ i.lengthCm ? i.lengthCm + '×' + i.widthCm + '×' + i.heightCm + ' cm' : '—' }}</td>
+                  <td>{{ i.totalWeightKg | number: '1.0-2' }}</td><td>{{ i.totalVolumeM3 === null ? '—' : (i.totalVolumeM3 | number: '1.0-3') }}</td></tr>
               }</tbody></table></div>
           </section>
           <app-attachment-panel [shipmentId]="s.id" [initial]="s.attachments" [editable]="s.actions.attachmentsEditable" />
