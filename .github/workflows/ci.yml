@@ -73,7 +73,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Generate throwaway credentials
-        # Fresh per run and masked in logs; the stack is destroyed at the end of the job.
+        # Fresh per run and masked in logs; the stack is destroyed at the end of the job. Every browser test signs in
+        # from the runner's single IP, so the per-IP login limit is raised for this throwaway stack only.
         run: |
           admin_password="E2e-$(openssl rand -hex 12)"
           echo "::add-mask::$admin_password"
@@ -83,6 +84,7 @@ jobs:
             -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 16)|" \
             -e "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=$(openssl rand -hex 16)|" \
             -e "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')|" \
+            -e "s|^LOGIN_MAX_ATTEMPTS_PER_IP=.*|LOGIN_MAX_ATTEMPTS_PER_IP=1000|" \
             .env
           grep -c '^JWT_SECRET=.\+' .env
 
