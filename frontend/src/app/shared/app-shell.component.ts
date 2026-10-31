@@ -1,20 +1,21 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
+import { ToastContainerComponent } from './toast-container.component';
 
 interface NavItem { path: string; label: string; exact?: boolean; }
 
 const NAV: Record<string, NavItem[]> = {
   CUSTOMER: [{ path: '/customer', label: 'Tổng quan', exact: true }, { path: '/customer/shipments', label: 'Đơn vận chuyển' }, { path: '/profile', label: 'Hồ sơ' }],
   DRIVER: [{ path: '/driver/verification', label: 'Trạng thái duyệt' }, { path: '/driver/profile', label: 'Giấy phép' }, { path: '/driver/vehicles', label: 'Phương tiện' }, { path: '/profile', label: 'Tài khoản' }],
-  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/profile', label: 'Tài khoản' }],
+  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/admin/pricing', label: 'Bảng giá' }, { path: '/admin/quotes', label: 'Báo giá chờ xử lý' }, { path: '/profile', label: 'Tài khoản' }],
 };
 
 /** Layout for signed-in areas. Menu items depend on role but every API call is still authorised server-side. */
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, ToastContainerComponent],
   template: `
   <div class="page">
     <header class="shell-bar">
@@ -31,6 +32,7 @@ const NAV: Record<string, NavItem[]> = {
       </div>
     </header>
     <router-outlet />
+    <app-toasts />
   </div>`,
   styles: [`.shell-bar{display:flex;align-items:center;gap:24px;padding:0 24px;min-height:68px;background:#fff;border-bottom:1px solid var(--tg-line);flex-wrap:wrap}
   .shell-brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:21px;letter-spacing:-1px;color:var(--tg-ink);text-decoration:none}.go{color:#78a648}
