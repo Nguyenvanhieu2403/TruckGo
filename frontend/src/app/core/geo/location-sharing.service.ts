@@ -30,6 +30,7 @@ export class LocationSharingService {
   private last: { latitude: number; longitude: number; at: number } | null = null;
   private pausedUntil = 0;
   private inFlight = false;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
 
   start(shipmentId: string, policy: TrackingPolicy): void {
     if (!this.geo) { this.state.set('unavailable'); this.message.set('Trình duyệt không hỗ trợ định vị.'); return; }
@@ -40,10 +41,17 @@ export class LocationSharingService {
     this.state.set('requesting');
     this.message.set(null);
     this.watchId = this.geo.watchPosition(p => this.onPosition(p), e => this.onError(e), { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 });
+    // watchPosition only fires when the device reports a change; a vehicle standing still would otherwise look
+    // offline to the customer. Ask for a fresh fix on the idle interval as well.
+    const geo = this.geo;
+    this.heartbeat = setInterval(() => geo.getCurrentPosition(p => this.onPosition(p), () => undefined, { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 }),
+      Math.max(this.policy.movingIntervalSeconds, 5) * 1000);
   }
 
   stop(): void {
     if (this.watchId !== null && this.geo) this.geo.clearWatch(this.watchId);
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
     this.watchId = null;
     this.last = null;
     this.inFlight = false;

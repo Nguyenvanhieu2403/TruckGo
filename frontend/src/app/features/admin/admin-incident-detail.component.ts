@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toApiError } from '../../core/api.service';
@@ -13,7 +13,7 @@ const NEXT: Record<IncidentStatus, IncidentStatus[]> = { OPEN: ['IN_PROGRESS', '
 @Component({
   selector: 'app-admin-incident-detail',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink, PhotoStripComponent],
+  imports: [DatePipe, FormsModule, RouterLink, PhotoStripComponent],
   template: `
   <main class="container">
     <a routerLink="/admin/incidents" class="kicker">← Sự cố</a>
@@ -24,7 +24,7 @@ const NEXT: Record<IncidentStatus, IncidentStatus[]> = { OPEN: ['IN_PROGRESS', '
       <div class="detail-grid">
         <section class="card"><h2>Nội dung</h2><p>{{ i.description }}</p>
           <dl class="dl compact"><dt>Người báo</dt><dd>{{ i.reportedByName || '—' }}</dd>
-            @if (i.latitude !== null) { <dt>Vị trí</dt><dd>{{ i.latitude | number: '1.5-5' }}, {{ i.longitude | number: '1.5-5' }}</dd> }
+            @if (i.latitude !== null) { <dt>Vị trí</dt><dd>{{ i.latitude.toFixed(5) }}, {{ i.longitude?.toFixed(5) }}</dd> }
             @if (i.resolutionNote) { <dt>Xử lý</dt><dd>{{ i.resolutionNote }}</dd> }
             @if (i.resolvedAt) { <dt>Đóng lúc</dt><dd>{{ i.resolvedAt | date: 'HH:mm dd/MM/yyyy' }}</dd> }</dl>
           <app-photo-strip [photos]="i.photos" /></section>

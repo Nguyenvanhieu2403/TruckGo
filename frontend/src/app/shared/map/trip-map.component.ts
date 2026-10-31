@@ -1,5 +1,4 @@
 import { AfterViewChecked, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { MAP_PROVIDER, MapPoint } from './map-provider';
 import { StopProgress, Tracking } from '../../core/api/trip.api';
 
@@ -7,13 +6,12 @@ import { StopProgress, Tracking } from '../../core/api/trip.api';
 @Component({
   selector: 'app-trip-map',
   standalone: true,
-  imports: [DecimalPipe],
   template: `
   @if (provider.interactive) { <div #canvas class="canvas" role="img" aria-label="Bản đồ chuyến đi"></div> }
   @else { <p class="muted small">Chưa cấu hình nhà cung cấp bản đồ; hiển thị vị trí dạng danh sách. Bấm "Xem bản đồ" để mở vị trí thật trên Google Maps.</p> }
   <ul class="points">
     @if (driverPoint(); as d) {
-      <li class="driver"><span class="dot dot-driver" aria-hidden="true"></span><div><strong>Tài xế</strong> · {{ d.latitude | number: '1.5-5' }}, {{ d.longitude | number: '1.5-5' }}
+      <li class="driver"><span class="dot dot-driver" aria-hidden="true"></span><div><strong>Tài xế</strong> · {{ coord(d.latitude) }}, {{ coord(d.longitude) }}
         @if (link(d); as url) { · <a [href]="url" target="_blank" rel="noopener noreferrer">Xem bản đồ</a> }</div></li>
     }
     @for (s of stops(); track s.stopId) {
@@ -38,6 +36,9 @@ export class TripMapComponent implements AfterViewChecked {
   });
 
   link(p: MapPoint): string | null { return this.provider.externalLink(p); }
+
+  /** Coordinates always use a decimal point (a Vietnamese decimal comma would be ambiguous in "lat, lng"). */
+  coord(v: number): string { return v.toFixed(5); }
 
   ngAfterViewChecked(): void {
     const el = this.canvas()?.nativeElement;
