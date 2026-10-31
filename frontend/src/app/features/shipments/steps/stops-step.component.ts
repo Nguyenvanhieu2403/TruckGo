@@ -2,13 +2,14 @@ import { Component, input } from '@angular/core';
 import { AbstractControl, ReactiveFormsModule } from '@angular/forms';
 import { fieldError } from '../../../shared/form-utils';
 import { ShipmentForm, stopForm } from '../shipment-form';
+import { AddressSearchComponent } from './address-search.component';
 
 const MESSAGES = { required: 'Trường này là bắt buộc', maxlength: 'Giá trị quá dài', pattern: 'Số điện thoại di động không hợp lệ', min: 'Giá trị ngoài phạm vi', max: 'Giá trị ngoài phạm vi' };
 
 @Component({
   selector: 'app-stops-step',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, AddressSearchComponent],
   template: `
   <div [formGroup]="form()">
     <section class="card" formGroupName="schedule">
@@ -44,6 +45,7 @@ const MESSAGES = { required: 'Trường này là bắt buộc', maxlength: 'Giá
               @if (err(stop.controls.contactPhone); as e) { <span class="error">{{ e }}</span> }
             </div>
           </div>
+          <app-address-search [stop]="stop" [index]="i" />
           <div class="grid-3">
             <div class="field" [class.invalid]="err(stop.controls.province)">
               <label [for]="'province' + i">Tỉnh/Thành phố</label><input [id]="'province' + i" formControlName="province" />
@@ -69,7 +71,7 @@ const MESSAGES = { required: 'Trường này là bắt buộc', maxlength: 'Giá
                 @if (err(stop.controls.longitude); as e) { <span class="error">{{ e }}</span> }
               </div>
             </div>
-            <p class="hint muted">Chưa tích hợp bản đồ: hệ thống không tự đoán tọa độ, bạn có thể bỏ trống.</p>
+            <p class="hint muted">Có thể bỏ trống. Hệ thống chỉ tự điền tọa độ khi dịch vụ bản đồ tìm được đúng địa chỉ, không bao giờ tự đoán.</p>
           </details>
           <div class="field"><label [for]="'note' + i">Ghi chú cho tài xế</label><input [id]="'note' + i" formControlName="note" /></div>
         </section>
