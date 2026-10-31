@@ -86,6 +86,11 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change_me_minio_local}
       MINIO_BUCKET: ${MINIO_BUCKET:-truckgo-private}
       SHIPMENT_BUSINESS_ZONE: ${SHIPMENT_BUSINESS_ZONE:-Asia/Ho_Chi_Minh}
+      # Road distance for quotes: none = an admin enters a verified distance; google needs GOOGLE_MAPS_API_KEY.
+      MAPS_ROUTE_PROVIDER: ${MAPS_ROUTE_PROVIDER:-none}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      QUOTE_VALIDITY: ${QUOTE_VALIDITY:-24h}
+      PRICING_CACHE_TTL: ${PRICING_CACHE_TTL:-10m}
       # Only read by the one-shot `--bootstrap-admin` command; leave empty otherwise.
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
