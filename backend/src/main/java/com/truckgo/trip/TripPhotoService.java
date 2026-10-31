@@ -1,8 +1,9 @@
 package com.truckgo.trip;
 
 import com.truckgo.common.exception.BusinessRuleException;
+import com.truckgo.driver.DriverProfile;
+import com.truckgo.driver.DriverProfileRepository;
 import com.truckgo.shipment.AttachmentFileType;
-import com.truckgo.shipment.Shipment;
 import com.truckgo.shipment.ShipmentAttachment;
 import com.truckgo.shipment.ShipmentAttachmentRepository;
 import com.truckgo.shipment.ShipmentAttachmentService;
@@ -30,30 +31,32 @@ public class TripPhotoService {
             AttachmentFileType.INCIDENT_PHOTO, EnumSet.of(ShipmentStatus.ASSIGNED, ShipmentStatus.DRIVER_ARRIVED, ShipmentStatus.PICKED_UP,
                     ShipmentStatus.IN_TRANSIT, ShipmentStatus.DELIVERED));
 
-    private final TripTransitionService transitions;
+    private final DriverProfileRepository drivers;
     private final TripQueryService queries;
     private final ShipmentAttachmentService storage;
     private final ShipmentAttachmentRepository attachments;
     private final TripProperties properties;
 
-    public TripPhotoService(TripTransitionService transitions, TripQueryService queries, ShipmentAttachmentService storage,
+    public TripPhotoService(DriverProfileRepository drivers, TripQueryService queries, ShipmentAttachmentService storage,
                             ShipmentAttachmentRepository attachments, TripProperties properties) {
-        this.transitions = transitions;
+        this.drivers = drivers;
         this.queries = queries;
         this.storage = storage;
         this.attachments = attachments;
         this.properties = properties;
     }
 
-    @Transactional
+    /** Not transactional: the attachment pipeline checks under the order's lock but uploads without holding it. */
     public PhotoView upload(UUID userId, UUID shipmentId, AttachmentFileType purpose, MultipartFile file) {
         if (purpose == null || !purpose.isTripPhoto()) throw new IllegalArgumentException("purpose phải là PICKUP_PHOTO, DELIVERY_PHOTO hoặc INCIDENT_PHOTO");
-        Shipment shipment = transitions.lock(userId, shipmentId).shipment();
-        if (!ALLOWED.get(purpose).contains(shipment.getStatus()))
-            throw BusinessRuleException.conflict(TripErrors.INVALID_TRIP_STATUS, "Không thể tải loại ảnh này khi chuyến ở trạng thái " + shipment.getStatus());
-        if (attachments.countByShipmentIdAndFileTypeNot(shipmentId, AttachmentFileType.GOODS_PHOTO) >= properties.maxTripPhotos())
-            throw BusinessRuleException.conflict(TripErrors.INVALID_TRIP_STATUS, "Mỗi chuyến tối đa " + properties.maxTripPhotos() + " ảnh");
-        ShipmentAttachment a = storage.storeTripPhoto(shipment, file, purpose, userId);
+        DriverProfile driver = drivers.findByUserId(userId).orElseThrow(TripTransitionService::notFound);
+        ShipmentAttachment a = storage.store(shipmentId, file, purpose, userId, shipment -> {
+            if (!shipment.isAssignedTo(driver.getId())) throw TripTransitionService.notFound();
+            if (!ALLOWED.get(purpose).contains(shipment.getStatus()))
+                throw BusinessRuleException.conflict(TripErrors.INVALID_TRIP_STATUS, "Không thể tải loại ảnh này khi chuyến ở trạng thái " + shipment.getStatus());
+            if (attachments.countByShipmentIdAndFileTypeNot(shipmentId, AttachmentFileType.GOODS_PHOTO) >= properties.maxTripPhotos())
+                throw BusinessRuleException.conflict(TripErrors.INVALID_TRIP_STATUS, "Mỗi chuyến tối đa " + properties.maxTripPhotos() + " ảnh");
+        });
         return new PhotoView(a.getId(), a.getFileType(), a.getFileName(), a.getFileSize(), a.getCreatedAt(),
                 "/api/v1/driver/trips/" + shipmentId + "/photos/" + a.getId() + "/content");
     }

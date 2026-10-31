@@ -4,6 +4,8 @@ import com.truckgo.common.exception.ConflictException;
 import com.truckgo.common.exception.ResourceNotFoundException;
 import com.truckgo.common.response.PageResponse;
 import com.truckgo.security.AuthenticatedUser;
+import com.truckgo.storage.StorageDeletionQueue;
+import com.truckgo.storage.StorageDeletionTask;
 import com.truckgo.shipment.dto.ShipmentRequests.DraftRequest;
 import com.truckgo.shipment.dto.ShipmentResponses.ShipmentDetail;
 import com.truckgo.shipment.dto.ShipmentResponses.ShipmentSummary;
@@ -33,13 +35,13 @@ public class ShipmentService {
     private final ShipmentDraftAssembler assembler;
     private final ShipmentMapper mapper;
     private final ShipmentCodeGenerator codes;
-    private final ShipmentAttachmentCleanup cleanup;
+    private final StorageDeletionQueue deletions;
     private final ShipmentProperties properties;
     private final Clock clock;
     private final ApplicationEventPublisher events;
 
     public ShipmentService(ShipmentRepository shipments, ShipmentAttachmentRepository attachments, ShipmentStatusHistoryRepository history,
-                           ShipmentDraftAssembler assembler, ShipmentMapper mapper, ShipmentCodeGenerator codes, ShipmentAttachmentCleanup cleanup,
+                           ShipmentDraftAssembler assembler, ShipmentMapper mapper, ShipmentCodeGenerator codes, StorageDeletionQueue deletions,
                            ShipmentProperties properties, Clock clock, ApplicationEventPublisher events) {
         this.shipments = shipments;
         this.attachments = attachments;
@@ -47,7 +49,7 @@ public class ShipmentService {
         this.assembler = assembler;
         this.mapper = mapper;
         this.codes = codes;
-        this.cleanup = cleanup;
+        this.deletions = deletions;
         this.properties = properties;
         this.clock = clock;
         this.events = events;
@@ -108,6 +110,10 @@ public class ShipmentService {
         shipment.markCancelled(clock.instant(), reason.trim());
         shipments.flush();
         recordStatus(shipment, previous, customerId, reason.trim());
+        // Goods photos of a cancelled order are no longer needed: remove the rows now, the objects once this commits.
+        List<ShipmentAttachment> photos = attachments.findByShipmentIdAndFileTypeOrderByCreatedAt(shipmentId, AttachmentFileType.GOODS_PHOTO);
+        attachments.deleteAll(photos);
+        deletions.enqueue(photos.stream().map(ShipmentAttachment::getFileKey).toList(), StorageDeletionTask.Reason.SHIPMENT_CANCELLED, shipmentId);
         if (previous == ShipmentStatus.PUBLISHED)
             events.publishEvent(new ShipmentCancelledEvent(shipment.getId(), customerId, shipment.getShipmentCode(), reason.trim()));
         log.info("Shipment cancelled shipmentId={} from={}", shipment.getId(), previous);
@@ -122,7 +128,7 @@ public class ShipmentService {
         List<ShipmentAttachment> files = attachments.findByShipmentIdOrderByCreatedAt(shipmentId);
         attachments.deleteAll(files);
         shipment.markDeleted(clock.instant());
-        cleanup.deleteObjectsAfterCommit(files.stream().map(ShipmentAttachment::getFileKey).toList());
+        deletions.enqueue(files.stream().map(ShipmentAttachment::getFileKey).toList(), StorageDeletionTask.Reason.DRAFT_DELETED, shipmentId);
         log.info("Shipment draft deleted shipmentId={} attachments={}", shipmentId, files.size());
     }
 
@@ -148,6 +154,12 @@ public class ShipmentService {
         if (viewer.role() != UserRole.ADMIN && !shipment.isOwnedBy(viewer.id())) throw notFound();
         return shipment;
     }
+
+    /** The order regardless of owner (callers apply their own access rule); 404 when it does not exist. */
+    Shipment requireExisting(UUID shipmentId) { return shipments.findById(shipmentId).orElseThrow(ShipmentService::notFound); }
+
+    /** Same, with the order's row lock (photo metadata is written under it). */
+    Shipment lockExisting(UUID shipmentId) { return shipments.findByIdForUpdate(shipmentId).orElseThrow(ShipmentService::notFound); }
 
     public Shipment requireOwned(UUID customerId, UUID shipmentId) {
         Shipment shipment = shipments.findById(shipmentId).orElseThrow(ShipmentService::notFound);
