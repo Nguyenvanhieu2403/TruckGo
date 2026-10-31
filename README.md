@@ -1,4 +1,4 @@
-# TruckGo — Sprint 4
+# TruckGo — Sprint 5
 
 Nền tảng kết nối khách hàng thuê xe tải với tài xế.
 
@@ -251,6 +251,48 @@ Frontend: mục **Báo giá** trong chi tiết đơn (tính giá, phân tích ch
 2. Trong trang bảng giá vừa tạo, thêm **phí dịch vụ** cho các dịch vụ thu phí.
 3. Lặp lại cho các loại xe đang phục vụ. Loại xe chưa có bảng giá → báo giá của khách vào **Báo giá chờ xử lý**.
 
+## Marketplace tài xế (Sprint 5)
+
+Tài xế tìm đơn đang mở, gửi yêu cầu nhận đơn bằng một xe của mình; khách hàng chọn một tài xế; đơn chuyển `PUBLISHED → ASSIGNED`.
+
+### Đơn nào lên Marketplace
+
+Đơn `PUBLISHED`, chưa có tài xế, **cần 1 xe**, có **báo giá đã được khách xác nhận** (`ACCEPTED`) và còn trước **hạn nhận đơn** = giờ lấy hàng − `MARKETPLACE_APPLICATION_CUTOFF` (mặc định 1h). Đơn quá giờ lấy hàng mà chưa chọn tài xế được job định kỳ (`MARKETPLACE_EXPIRY_INTERVAL`, mặc định 5 phút) chuyển sang `EXPIRED`; yêu cầu đang chờ chuyển `EXPIRED` và mọi bên được thông báo.
+
+Trước khi được chọn, tài xế chỉ thấy **khu vực** (tỉnh/quận/phường), không thấy địa chỉ chi tiết và số liên hệ; số điện thoại tài xế chỉ hiện cho khách sau khi khách chọn tài xế đó.
+
+### Điều kiện nhận đơn
+
+- Tài xế: hồ sơ `APPROVED`, tài khoản `ACTIVE`; tối đa `MARKETPLACE_MAX_PENDING_PER_DRIVER` (10) yêu cầu đang chờ; một yêu cầu đang hoạt động mỗi đơn; bị từ chối thì không gửi lại được, đã rút thì được gửi lại.
+- Xe (của chính tài xế, `APPROVED`): đăng kiểm còn hạn tới ngày lấy hàng; tải trọng ≥ tổng khối lượng và ≥ tải trọng tối thiểu; **thuộc hạng xe khách chọn** (tải trọng lớn hơn hạng ngay dưới trong danh mục); thùng ≥ kích thước tối thiểu; từng kiện vừa thùng (được xoay); tổng thể tích ≤ thể tích thùng; thùng đông lạnh/"Cần giữ lạnh" cần xe đông lạnh, container cần xe container. Lý do không đạt được trả về cho tài xế.
+
+### Chống gán trùng
+
+`accept` khóa dòng đơn (`SELECT … FOR UPDATE`, dùng chung với gửi yêu cầu, hủy đơn và xác nhận báo giá), kiểm tra lại đơn/yêu cầu/tài xế/xe dưới khóa, rồi gán bằng **câu lệnh cập nhật có điều kiện** (`… WHERE status = 'PUBLISHED' AND assigned_driver_id IS NULL`); **unique index** `uq_driver_applications_accepted` là chốt cuối. Các yêu cầu khác bị từ chối trong cùng transaction, ghi lịch sử trạng thái + lịch sử phân công, tạo thông báo. Test tích hợp chạy 6 lượt chọn đồng thời: đúng 1 thành công.
+
+Mã lỗi nghiệp vụ trả về ở `data.code`: `SHIPMENT_ALREADY_ASSIGNED`, `SHIPMENT_NOT_AVAILABLE`, `APPLICATION_NOT_PENDING`, `DRIVER_NOT_ELIGIBLE`, `VEHICLE_NOT_ELIGIBLE` (kèm `data.reasons`), `ALREADY_APPLIED`, `APPLICATION_REJECTED_BEFORE`, `APPLICATION_LIMIT_REACHED`.
+
+### Cache
+
+Trang danh sách Marketplace (dữ liệu chung, không có trạng thái riêng của tài xế) được cache trong Redis `MARKETPLACE_CACHE_TTL` (30s). Key có số thế hệ; đăng đơn, xác nhận giá, chọn tài xế, hủy, hết hạn tăng thế hệ sau commit nên mọi trang cũ bị bỏ. Redis lỗi thì đọc thẳng PostgreSQL.
+
+### API Marketplace (`/api/v1`)
+
+| Method | Endpoint | Vai trò | Mô tả |
+|---|---|---|---|
+| GET | `/driver/marketplace/shipments` | DRIVER | Đơn đang mở; lọc `keyword, pickupProvince, pickupDistrict, deliveryProvince, deliveryDistrict, vehicleTypeId, minPrice, maxPrice, minWeight, maxWeight, maxDistance`; `sortBy=pickupTime\|price\|distance\|weight\|publishedAt`, `sortDirection`, `page`, `size` |
+| GET | `/driver/marketplace/shipments/{id}` | DRIVER | Chi tiết + xe của tôi có đạt không |
+| POST | `/driver/marketplace/shipments/{id}/applications` | DRIVER | `{vehicleId, driverMessage}`; tài xế lấy từ JWT |
+| GET | `/driver/applications/my`, `/driver/applications/{id}` | DRIVER | Yêu cầu của tôi |
+| POST | `/driver/applications/{id}/withdraw` | DRIVER | Rút yêu cầu đang chờ |
+| GET | `/customer/shipments/{id}/applications[/{applicationId}]` | CUSTOMER | Tài xế ứng tuyển (chủ đơn) |
+| POST | `/customer/shipments/{id}/applications/{applicationId}/accept\|reject` | CUSTOMER | Chọn / từ chối (`{reason}`) |
+| GET | `/notifications`, `/notifications/unread-count` | Đã đăng nhập | Thông báo của tôi |
+| PATCH | `/notifications/{id}/read`, `/notifications/read-all` | Đã đăng nhập | Đánh dấu đã đọc |
+| GET | `/admin/marketplace/shipments`, `/applications[/{id}]`, `/assignments` | ADMIN | Theo dõi |
+
+Giao diện: `/driver/marketplace`, `/driver/marketplace/:shipmentId`, `/driver/applications`, `/driver/applications/:applicationId`; khung "Tài xế muốn nhận đơn" trong chi tiết đơn của khách; `/admin/marketplace`; chuông thông báo trên thanh điều hướng (cập nhật mỗi 60s).
+
 ## Cơ sở dữ liệu
 
 Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_driver_vehicle_tables.sql` (V1 giữ nguyên). Flyway tự chạy khi backend khởi động; database Sprint 1 chỉ có V1 nên V2 được áp dụng tiếp.
@@ -298,6 +340,10 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `GOOGLE_DIRECTIONS_URL`, `MAPS_CONNECT_TIMEOUT`, `MAPS_READ_TIMEOUT`, `MAPS_MAX_REASONABLE_KM` | Google mặc định, `3s`, `5s`, `3000` | |
 | `QUOTE_VALIDITY` | `24h` | Thời hạn báo giá đã tính |
 | `PRICING_CACHE_TTL` | `10m` | TTL cache bảng giá đang bật |
+| `MARKETPLACE_APPLICATION_CUTOFF` | `1h` | Ngừng nhận yêu cầu trước giờ lấy hàng bao lâu |
+| `MARKETPLACE_MAX_PENDING_PER_DRIVER` | `10` | Số yêu cầu đang chờ tối đa của một tài xế |
+| `MARKETPLACE_CACHE_TTL` | `30s` | TTL cache danh sách Marketplace |
+| `MARKETPLACE_EXPIRY_INTERVAL` | `5m` | Chu kỳ job chuyển đơn quá hạn sang `EXPIRED` |
 
 Không commit `.env` hay secret thật.
 
@@ -397,7 +443,8 @@ npm run e2e                  # báo cáo HTML: npx playwright show-report
 Test tự tạo tài khoản khách hàng với email ngẫu nhiên nên chạy lặp lại được trên cùng database; không nên chạy trên môi trường production.
 
 - Định giá (`pricing.spec.ts`, `pricing-ui.spec.ts`): cần tài khoản admin. Mỗi spec tạm tắt bảng giá đang bật của một loại xe (1 tấn, 1,5 tấn), tự tạo bảng giá riêng và **bật lại bảng giá gốc khi kết thúc**, nên chạy được cả trên stack có bảng giá thật/mẫu. `pricing-ui.spec.ts` kiểm tra phân tích giá với phụ phí đêm và cuối tuần khớp số tính tay (640.175 VNĐ), từ chối/lịch sử, điều chỉnh giảm giá và xác nhận, sửa đơn sau khi xác nhận, định dạng số tiếng Việt và hiển thị 390px.
-- Mỗi lượt chạy đăng nhập khoảng 30 lần từ cùng một IP. Với stack dành cho E2E, đặt `LOGIN_MAX_ATTEMPTS_PER_IP` cao (CI dùng 1000) để không bị chặn 429 khi chạy lặp; giữ giá trị mặc định cho môi trường thật.
+- Marketplace (`marketplace.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 2,5 tấn rồi bật lại khi xong. Tạo đơn có giá đã xác nhận, hai tài xế được duyệt; kiểm tra lọc theo khu vực không dấu, ẩn địa chỉ trước khi được chọn, gửi yêu cầu có xác nhận, khách nhận thông báo và chọn một tài xế, tài xế được chọn thấy địa chỉ, tài xế còn lại "Không được chọn", admin thấy lịch sử phân công, màn hình 390px.
+- Mỗi lượt chạy đăng nhập khoảng 40 lần từ cùng một IP. Với stack dành cho E2E, đặt `LOGIN_MAX_ATTEMPTS_PER_IP` cao (CI dùng 1000) để không bị chặn 429 khi chạy lặp; giữ giá trị mặc định cho môi trường thật.
 
 Integration test tự bỏ qua nếu không có Docker (`@Testcontainers(disabledWithoutDocker = true)`). Unit test mock Redis; integration test dùng Redis thật.
 
@@ -407,14 +454,28 @@ Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị t�
 
 Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khung giờ qua đêm, làm tròn, giá tối thiểu, điều chỉnh âm, dữ liệu không hợp lệ) và provider Google (nhiều chặng, lỗi, timeout, không lộ key); integration test định giá (ví dụ 360.000, tổng khớp chi tiết, không có/hết hạn bảng giá, provider lỗi → ADMIN nhập quãng đường có audit, quyền truy cập, hết hạn, đã xác nhận không đổi, sửa đơn thay thế báo giá, đồng thời, đổi bảng giá không ảnh hưởng báo giá cũ, validation/trùng thời gian, cache); frontend (panel báo giá, form bảng giá, xử lý báo giá) và E2E luồng định giá.
 
+Sprint 5 thêm: unit test điều kiện xe (duyệt, đăng kiểm, hạng xe, xoay kiện, thể tích, đông lạnh/container) và bộ lọc Marketplace; integration test luồng đầy đủ, 6 lượt chọn đồng thời, các mã lỗi, quyền sở hữu/vai trò, rút/từ chối, hủy và hết hạn đóng yêu cầu, thông báo, admin, xóa cache; frontend (danh sách/chi tiết Marketplace, khung chọn tài xế, chuông thông báo) và E2E Marketplace.
+
 ## Giới hạn còn tồn tại
+
+**Sprint 5**
+
+- Đơn cần nhiều xe (`vehicleCount > 1`) chưa lên Marketplace (admin vẫn thấy).
+- Chưa kiểm tra trùng lịch của xe/tài xế giữa các đơn đã nhận.
+- Sprint 2 không lưu loại thùng của xe nên chỉ kiểm tra được đông lạnh và container, chưa kiểm tra thùng lửng/bạt/kín.
+- Thông báo trong app lưu ở PostgreSQL, cập nhật bằng polling 60s; chưa có WebSocket/push/email.
+- Đơn hết hạn do hệ thống: lịch sử trạng thái ghi người thực hiện là chủ đơn kèm lý do "Hệ thống" (cột người thực hiện là bắt buộc).
+- Chưa có gỡ tài xế/đổi tài xế sau khi gán và chưa có các trạng thái sau `ASSIGNED` (Sprint sau). Đơn `ASSIGNED` không hủy được.
+- Danh sách cache tối đa 30s nên một đơn vừa qua hạn nhận có thể còn hiện tới 30s; gửi yêu cầu luôn kiểm tra lại nên không nhận nhầm.
+- Chưa có ảnh đại diện/đánh giá tài xế (chưa có dữ liệu); hiển thị số chuyến hoàn thành thật.
+
 
 **Sprint 4**
 
 - Chưa có job định kỳ chuyển báo giá sang `EXPIRED`; trạng thái hết hạn được áp dụng khi báo giá được đọc/xác nhận/từ chối.
 - Mới có Google Directions; Mapbox/OSRM cần thêm adapter cho `RouteDistanceService`. Không có quota/cache kết quả tuyến đường.
 - Mỗi lần khách bấm "Tính giá" tạo một phiên bản mới; chưa giới hạn tần suất.
-- Đăng đơn chưa bắt buộc có báo giá đã xác nhận (giữ hành vi Sprint 3); Sprint 5 nên dùng `ACCEPTED` làm điều kiện ghép tài xế.
+- Đăng đơn chưa bắt buộc có báo giá đã xác nhận (giữ hành vi Sprint 3); từ Sprint 5 chỉ đơn có báo giá `ACCEPTED` mới lên Marketplace.
 - Phí dịch vụ áp theo đơn, chưa phân biệt điểm lấy/điểm giao (vd. bốc ở điểm lấy, dỡ ở điểm giao).
 
 
