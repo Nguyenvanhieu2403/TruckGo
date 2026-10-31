@@ -78,8 +78,18 @@ app:
       max-attempts-per-ip: ${LOGIN_MAX_ATTEMPTS_PER_IP:30}
       window: ${LOGIN_RATE_LIMIT_WINDOW:15m}
   maps:
-    # Geocoding seam from Sprint 3 (only "none" exists).
-    provider: none
+    # Address search/geocoding: none (manual addresses) or google (uses GOOGLE_MAPS_API_KEY below).
+    geocoding:
+      provider: ${MAPS_GEOCODING_PROVIDER:none}
+      base-url: ${GOOGLE_GEOCODING_URL:https://maps.googleapis.com/maps/api/geocode/json}
+      cache-ttl: ${MAPS_GEOCODING_CACHE_TTL:24h}
+      searches-per-minute: ${MAPS_GEOCODING_SEARCHES_PER_MINUTE:30}
+      max-results: 5
+      # Answers outside this box (mainland Viet Nam) are discarded as wrong matches.
+      min-latitude: ${MAPS_SERVICE_MIN_LAT:8.0}
+      max-latitude: ${MAPS_SERVICE_MAX_LAT:23.5}
+      min-longitude: ${MAPS_SERVICE_MIN_LNG:102.0}
+      max-longitude: ${MAPS_SERVICE_MAX_LNG:110.0}
     # Road distance for pricing: none (admin enters a verified distance) or google.
     route-provider: ${MAPS_ROUTE_PROVIDER:none}
     max-reasonable-km: ${MAPS_MAX_REASONABLE_KM:3000}
@@ -142,6 +152,21 @@ app:
     secret-key: ${MINIO_SECRET_KEY:}
     bucket: ${MINIO_BUCKET:truckgo-private}
     region: ${MINIO_REGION:}
+    cleanup:
+      # Deletion queue: retried with exponential backoff (1 min, 2, 4 … max-delay) until max-attempts.
+      retry-interval: ${STORAGE_CLEANUP_RETRY_INTERVAL:1m}
+      batch-size: 100
+      max-attempts: ${STORAGE_CLEANUP_MAX_ATTEMPTS:20}
+      max-delay: 6h
+      lease: 5m
+      # Orphan sweep: objects without a photo row. Dry run by default: it only logs until an operator turns it off.
+      orphan-sweep-enabled: ${STORAGE_ORPHAN_SWEEP_ENABLED:true}
+      orphan-dry-run: ${STORAGE_ORPHAN_DRY_RUN:true}
+      orphan-min-age: ${STORAGE_ORPHAN_MIN_AGE:24h}
+      orphan-interval: ${STORAGE_ORPHAN_INTERVAL:6h}
+      orphan-scan-limit: 1000
+      orphan-max-deletes-per-run: ${STORAGE_ORPHAN_MAX_DELETES:100}
+      orphan-max-ratio: 0.5
   driver:
     # Vietnamese PET driving licence numbers have 12 digits.
     license-number-pattern: ${DRIVER_LICENSE_NUMBER_PATTERN:^[0-9]{12}$}

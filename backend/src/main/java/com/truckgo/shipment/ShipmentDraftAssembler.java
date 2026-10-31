@@ -124,7 +124,9 @@ public class ShipmentDraftAssembler {
             BigDecimal lat = s.latitude();
             BigDecimal lng = s.longitude();
             if (lat == null && lng == null) {
-                Optional<GeoPoint> point = geocoder.geocode(full);
+                // Only a precise, full match fills blank coordinates; any provider problem leaves them blank.
+                Optional<GeoPoint> point;
+                try { point = geocoder.geocode(full); } catch (RuntimeException ex) { point = Optional.empty(); }
                 if (point.isPresent()) { lat = point.get().latitude(); lng = point.get().longitude(); }
             }
             stops.add(new ShipmentStop(s.stopType(), position + 1, s.contactName().trim(), phone, s.province().trim(), blankToNull(s.district()),
