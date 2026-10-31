@@ -91,6 +91,9 @@ app:
       read-timeout: ${MAPS_READ_TIMEOUT:5s}
   catalog:
     cache-ttl: ${CATALOG_CACHE_TTL:1h}
+  pricing:
+    cache-ttl: ${PRICING_CACHE_TTL:10m}
+    quote-validity: ${QUOTE_VALIDITY:24h}
   shipment:
     business-zone: ${SHIPMENT_BUSINESS_ZONE:Asia/Ho_Chi_Minh}
     min-pickup-lead: ${SHIPMENT_MIN_PICKUP_LEAD:15m}
