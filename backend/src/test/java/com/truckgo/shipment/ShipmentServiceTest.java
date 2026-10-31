@@ -37,7 +37,7 @@ class ShipmentServiceTest {
     private final ShipmentProperties properties = new ShipmentProperties(ZoneId.of("Asia/Ho_Chi_Minh"), Duration.ofMinutes(15), 10, 50, 10, null, List.of());
     private final ShipmentService service = new ShipmentService(shipments, attachments, history,
             new ShipmentDraftAssembler(ShipmentTestData.catalogs(), new NoGeocodingProvider(), clock), new ShipmentMapper(ShipmentTestData.catalogs()),
-            codes, mock(ShipmentAttachmentCleanup.class), properties, clock);
+            codes, mock(ShipmentAttachmentCleanup.class), properties, clock, mock(org.springframework.context.ApplicationEventPublisher.class));
     private final UUID customerA = UUID.randomUUID();
     private final UUID customerB = UUID.randomUUID();
 

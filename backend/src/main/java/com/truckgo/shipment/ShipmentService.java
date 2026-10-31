@@ -10,6 +10,7 @@ import com.truckgo.shipment.dto.ShipmentResponses.ShipmentSummary;
 import com.truckgo.user.UserRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,10 +36,11 @@ public class ShipmentService {
     private final ShipmentAttachmentCleanup cleanup;
     private final ShipmentProperties properties;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
     public ShipmentService(ShipmentRepository shipments, ShipmentAttachmentRepository attachments, ShipmentStatusHistoryRepository history,
                            ShipmentDraftAssembler assembler, ShipmentMapper mapper, ShipmentCodeGenerator codes, ShipmentAttachmentCleanup cleanup,
-                           ShipmentProperties properties, Clock clock) {
+                           ShipmentProperties properties, Clock clock, ApplicationEventPublisher events) {
         this.shipments = shipments;
         this.attachments = attachments;
         this.history = history;
@@ -48,6 +50,7 @@ public class ShipmentService {
         this.cleanup = cleanup;
         this.properties = properties;
         this.clock = clock;
+        this.events = events;
     }
 
     @Transactional
@@ -73,7 +76,10 @@ public class ShipmentService {
         // ones and trip the (shipment_id, sequence_no) and (shipment_id, service_code) unique keys.
         shipments.flush();
         assembler.apply(shipment, request);
+        // Any existing quote no longer describes this order (pricing listens and supersedes it).
+        shipment.setEstimatedPrice(null);
         shipments.flush();
+        events.publishEvent(new ShipmentDetailsChangedEvent(shipment.getId(), customerId));
         return detail(shipment, true);
     }
 

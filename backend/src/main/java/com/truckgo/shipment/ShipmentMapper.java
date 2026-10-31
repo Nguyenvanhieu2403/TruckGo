@@ -15,6 +15,8 @@ import com.truckgo.shipment.dto.ShipmentResponses.StatusHistoryResponse;
 import com.truckgo.shipment.dto.ShipmentResponses.StopResponse;
 import com.truckgo.shipment.dto.ShipmentResponses.VehicleRequirement;
 import com.truckgo.shipment.dto.ShipmentResponses.Warning;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -30,14 +32,25 @@ public class ShipmentMapper {
     private static final BigDecimal CM3_PER_M3 = BigDecimal.valueOf(1_000_000);
 
     private final CatalogService catalogs;
+    private final ShipmentPriceProvider prices;
 
-    public ShipmentMapper(CatalogService catalogs) { this.catalogs = catalogs; }
+    @Autowired
+    public ShipmentMapper(CatalogService catalogs, ObjectProvider<ShipmentPriceProvider> prices) {
+        this.catalogs = catalogs;
+        this.prices = prices.getIfAvailable(() -> id -> Optional.empty());
+    }
+
+    public ShipmentMapper(CatalogService catalogs) {
+        this.catalogs = catalogs;
+        this.prices = id -> Optional.empty();
+    }
 
     public ShipmentDetail toDetail(Shipment s, List<ShipmentAttachment> attachments, List<ShipmentStatusHistory> history, boolean viewerIsOwner) {
         List<StopResponse> stops = s.getStops().stream().map(ShipmentMapper::stop).toList();
+        Optional<ShipmentPriceProvider.CurrentPrice> price = prices.currentPrice(s.getId());
         return new ShipmentDetail(s.getId(), s.getShipmentCode(), s.getStatus(), s.getCustomerId(), s.getPickupTime(), s.getDeliveryDeadline(),
-                vehicle(s), s.getTotalQuantity(), s.getTotalWeightKg(), s.getTotalVolumeM3(), s.getCustomerNote(), priceStatus(s),
-                s.getEstimatedPrice(), s.getFinalPrice(),
+                vehicle(s), s.getTotalQuantity(), s.getTotalWeightKg(), s.getTotalVolumeM3(), s.getCustomerNote(), priceStatus(s, price),
+                price.map(ShipmentPriceProvider.CurrentPrice::amount).orElse(s.getEstimatedPrice()), s.getFinalPrice(),
                 stops.stream().filter(x -> x.stopType() == StopType.PICKUP).findFirst().orElse(null),
                 stops.stream().filter(x -> x.stopType() == StopType.DELIVERY).reduce((a, b) -> b).orElse(null),
                 stops, s.getItems().stream().map(this::item).toList(), s.getServices().stream().map(this::service).toList(),
@@ -109,9 +122,9 @@ public class ShipmentMapper {
                 s.getBodyTypeCode(), bodyName, s.getVehicleCount(), s.getMinimumPayloadKg(), s.getMinCargoLengthCm(), s.getMinCargoWidthCm(), s.getMinCargoHeightCm());
     }
 
-    private static PriceStatus priceStatus(Shipment s) {
+    private static PriceStatus priceStatus(Shipment s, Optional<ShipmentPriceProvider.CurrentPrice> price) {
         if (s.getFinalPrice() != null) return PriceStatus.FINAL;
-        return s.getEstimatedPrice() != null ? PriceStatus.QUOTED : PriceStatus.NOT_QUOTED;
+        return price.map(p -> PriceStatus.valueOf(p.state().name())).orElse(PriceStatus.NOT_QUOTED);
     }
 
     private static StopResponse stop(ShipmentStop x) {

@@ -13,8 +13,8 @@ import java.util.UUID;
 public final class ShipmentResponses {
     private ShipmentResponses() { }
 
-    /** Prices are not computed in Sprint 3; clients show "not quoted yet" instead of a number. */
-    public enum PriceStatus { NOT_QUOTED, QUOTED, FINAL }
+    /** Current price state from the pricing module; FINAL is reserved for the settled trip price. */
+    public enum PriceStatus { NOT_QUOTED, AWAITING_REVIEW, QUOTED, ACCEPTED, FINAL }
 
     public record Warning(String code, String message) { }
 

@@ -44,7 +44,7 @@ public class Shipment {
     @Column(name = "total_weight_kg", nullable = false) private BigDecimal totalWeightKg = BigDecimal.ZERO;
     @Column(name = "total_volume_m3", nullable = false) private BigDecimal totalVolumeM3 = BigDecimal.ZERO;
     @Column(name = "customer_note") private String customerNote;
-    /** Not computed in Sprint 3; quoting arrives in Sprint 4. */
+    /** Total of the accepted quote (Sprint 4); null until the customer accepts a quote. */
     @Column(name = "estimated_price") private BigDecimal estimatedPrice;
     @Column(name = "final_price") private BigDecimal finalPrice;
     @Column(name = "published_at") private Instant publishedAt;
@@ -118,6 +118,9 @@ public class Shipment {
         if (status != ShipmentStatus.DRAFT) throw new ConflictException("Chỉ có thể xóa đơn nháp");
         deletedAt = at;
     }
+
+    /** Price agreed by the customer (the accepted quote's total); cleared when the order changes. */
+    public void setEstimatedPrice(BigDecimal estimatedPrice) { this.estimatedPrice = estimatedPrice; }
 
     public boolean isOwnedBy(UUID userId) { return customerId.equals(userId); }
 
