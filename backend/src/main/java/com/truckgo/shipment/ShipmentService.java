@@ -52,9 +52,10 @@ public class ShipmentService {
 
     @Transactional
     public ShipmentDetail createDraft(UUID customerId, DraftRequest request) {
-        Shipment shipment = new Shipment(uniqueCode(), customerId);
-        assembler.apply(shipment, request);
-        shipments.saveAndFlush(shipment);
+        Shipment draft = new Shipment(uniqueCode(), customerId);
+        assembler.apply(draft, request);
+        // Assigned ids make Spring Data merge; the returned managed copy carries the generated timestamps.
+        Shipment shipment = shipments.saveAndFlush(draft);
         recordStatus(shipment, null, customerId, "Tạo đơn nháp");
         log.info("Shipment draft created shipmentId={} code={}", shipment.getId(), shipment.getShipmentCode());
         return detail(shipment, true);

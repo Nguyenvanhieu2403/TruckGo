@@ -164,6 +164,8 @@ class ShipmentIntegrationTest extends IntegrationTestSupport {
         JsonNode d = createDraft(session, body);
         assertThat(d.get("shipmentCode").asText()).matches("TG\\d{6}-[2-9A-HJKMNP-Z]{6}");
         assertThat(d.get("status").asText()).isEqualTo("DRAFT");
+        assertThat(d.get("createdAt").isNull()).as("timestamps are returned on create").isFalse();
+        assertThat(d.get("updatedAt").isNull()).isFalse();
         assertThat(d.get("customerId").asText()).isEqualTo(session.user().get("id").asText());
         assertThat(d.get("totalQuantity").asInt()).isEqualTo(13);
         assertThat(d.get("totalWeightKg").decimalValue()).isEqualByComparingTo("330");
