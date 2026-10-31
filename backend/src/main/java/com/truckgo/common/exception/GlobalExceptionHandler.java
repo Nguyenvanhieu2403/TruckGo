@@ -65,6 +65,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.status()).body(ApiResponse.failure(ex.getMessage(), ex.errors(), request.getRequestURI()));
     }
 
+    @ExceptionHandler(BusinessRuleException.class)
+    public ResponseEntity<ApiResponse<Map<String, Object>>> businessRule(BusinessRuleException ex, HttpServletRequest request) {
+        Map<String, Object> data = new java.util.LinkedHashMap<>(ex.details());
+        data.put("code", ex.code());
+        return ResponseEntity.status(ex.status()).body(ApiResponse.failure(ex.getMessage(), data, request.getRequestURI()));
+    }
+
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ApiResponse<Void>> constraint(ConstraintViolationException ex, HttpServletRequest request) {
         return response(HttpStatus.BAD_REQUEST, "Dữ liệu không hợp lệ", request);
