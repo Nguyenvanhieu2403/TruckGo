@@ -83,6 +83,7 @@ jobs:
           sed -i \
             -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 16)|" \
             -e "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=$(openssl rand -hex 16)|" \
+            -e "s|^MINIO_APP_SECRET_KEY=.*|MINIO_APP_SECRET_KEY=$(openssl rand -hex 16)|" \
             -e "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')|" \
             -e "s|^LOGIN_MAX_ATTEMPTS_PER_IP=.*|LOGIN_MAX_ATTEMPTS_PER_IP=1000|" \
             .env
@@ -90,6 +91,11 @@ jobs:
 
       - name: Start the stack
         run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Check the backend does not hold the MinIO root account
+        run: |
+          docker compose logs minio-init | grep -q "MinIO ready"
+          test "$(docker compose exec -T backend printenv MINIO_ACCESS_KEY)" = "$(grep '^MINIO_APP_ACCESS_KEY=' .env | cut -d= -f2)"
 
       - name: Create the admin used by the admin check
         run: >
