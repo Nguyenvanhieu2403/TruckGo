@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
+import { LocationSharingService } from '../core/geo/location-sharing.service';
 import { ToastContainerComponent } from './toast-container.component';
 import { NotificationBellComponent } from './notification-bell.component';
 
@@ -8,8 +9,8 @@ interface NavItem { path: string; label: string; exact?: boolean; }
 
 const NAV: Record<string, NavItem[]> = {
   CUSTOMER: [{ path: '/customer', label: 'Tổng quan', exact: true }, { path: '/customer/shipments', label: 'Đơn vận chuyển' }, { path: '/profile', label: 'Hồ sơ' }],
-  DRIVER: [{ path: '/driver/marketplace', label: 'Tìm đơn' }, { path: '/driver/applications', label: 'Yêu cầu của tôi' }, { path: '/driver/verification', label: 'Trạng thái duyệt' }, { path: '/driver/profile', label: 'Giấy phép' }, { path: '/driver/vehicles', label: 'Phương tiện' }, { path: '/profile', label: 'Tài khoản' }],
-  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/admin/marketplace', label: 'Marketplace' }, { path: '/admin/pricing', label: 'Bảng giá' }, { path: '/admin/quotes', label: 'Báo giá chờ xử lý' }, { path: '/profile', label: 'Tài khoản' }],
+  DRIVER: [{ path: '/driver/trips', label: 'Chuyến của tôi' }, { path: '/driver/marketplace', label: 'Tìm đơn' }, { path: '/driver/applications', label: 'Yêu cầu của tôi' }, { path: '/driver/verification', label: 'Trạng thái duyệt' }, { path: '/driver/profile', label: 'Giấy phép' }, { path: '/driver/vehicles', label: 'Phương tiện' }, { path: '/profile', label: 'Tài khoản' }],
+  ADMIN: [{ path: '/admin/drivers', label: 'Duyệt tài xế' }, { path: '/admin/vehicles', label: 'Duyệt phương tiện' }, { path: '/admin/users', label: 'Người dùng' }, { path: '/admin/shipments', label: 'Đơn hàng' }, { path: '/admin/marketplace', label: 'Marketplace' }, { path: '/admin/incidents', label: 'Sự cố' }, { path: '/admin/pricing', label: 'Bảng giá' }, { path: '/admin/quotes', label: 'Báo giá chờ xử lý' }, { path: '/profile', label: 'Tài khoản' }],
 };
 
 /** Layout for signed-in areas. Menu items depend on role but every API call is still authorised server-side. */
@@ -46,12 +47,14 @@ const NAV: Record<string, NavItem[]> = {
 })
 export class AppShellComponent {
   protected readonly auth = inject(AuthService);
+  private readonly sharing = inject(LocationSharingService);
   protected readonly open = signal(false);
   protected readonly loggingOut = signal(false);
   protected readonly nav = computed(() => NAV[this.auth.role() ?? ''] ?? []);
   protected readonly roleLabel = computed(() => ({ CUSTOMER: 'Khách hàng', DRIVER: 'Tài xế', ADMIN: 'Quản trị viên' } as Record<string, string>)[this.auth.role() ?? ''] ?? '');
 
   logout(): void {
+    this.sharing.stop();   // never keep sending a position after sign-out
     this.loggingOut.set(true);
     this.auth.logout().subscribe({ complete: () => this.loggingOut.set(false) });
   }

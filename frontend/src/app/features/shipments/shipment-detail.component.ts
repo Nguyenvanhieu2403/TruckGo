@@ -64,6 +64,8 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
         <aside>
           @if (s.assignment; as d) {
             <section class="card assigned" data-testid="assigned-driver"><h2>Tài xế đã nhận</h2>
+              @if (!admin()) { <a class="btn btn-primary btn-block" [routerLink]="['/customer/shipments', s.id, 'tracking']" style="margin-bottom:10px">
+                {{ s.status === 'DELIVERED' ? 'Xác nhận nhận hàng' : 'Theo dõi chuyến' }}</a> }
               <dl class="dl compact"><dt>Tài xế</dt><dd><strong>{{ d.fullName || '—' }}</strong></dd>
                 <dt>Điện thoại</dt><dd>@if (d.phone) { <a [href]="'tel:' + d.phone">{{ d.phone }}</a> } @else { — }</dd>
                 <dt>Xe</dt><dd>{{ d.plateNumber }}@if (d.maxPayloadKg) { · {{ d.maxPayloadKg | number }} kg }</dd>

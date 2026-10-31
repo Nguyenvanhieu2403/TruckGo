@@ -99,7 +99,9 @@ export class NotificationBellComponent implements OnInit {
     if (!n.referenceId) return null;
     const role = this.auth.role();
     if (n.referenceType === 'APPLICATION' && role === 'DRIVER') return ['/driver/applications', n.referenceId];
-    if (n.referenceType === 'SHIPMENT' && role === 'CUSTOMER') return ['/customer/shipments', n.referenceId];
+    if (n.referenceType === 'SHIPMENT' && role === 'CUSTOMER')
+      return n.type.startsWith('APPLICATION') || n.type === 'SHIPMENT_EXPIRED' ? ['/customer/shipments', n.referenceId] : ['/customer/shipments', n.referenceId, 'tracking'];
+    if (n.referenceType === 'SHIPMENT' && role === 'DRIVER') return ['/driver/trips', n.referenceId];
     if (n.referenceType === 'SHIPMENT' && role === 'ADMIN') return ['/admin/shipments', n.referenceId];
     return null;
   }

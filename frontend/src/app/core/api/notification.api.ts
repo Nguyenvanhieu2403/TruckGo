@@ -4,7 +4,8 @@ import { Observable, map } from 'rxjs';
 import { API_BASE, ApiResponse, PageResponse } from '../api.service';
 import { toParams } from './marketplace.api';
 
-export type NotificationType = 'APPLICATION_RECEIVED' | 'APPLICATION_WITHDRAWN' | 'APPLICATION_ACCEPTED' | 'APPLICATION_REJECTED' | 'APPLICATION_EXPIRED' | 'SHIPMENT_EXPIRED';
+export type NotificationType = 'APPLICATION_RECEIVED' | 'APPLICATION_WITHDRAWN' | 'APPLICATION_ACCEPTED' | 'APPLICATION_REJECTED' | 'APPLICATION_EXPIRED' | 'SHIPMENT_EXPIRED'
+  | 'TRIP_STATUS_CHANGED' | 'DELIVERY_OTP' | 'DELIVERY_CONFIRMED' | 'TRIP_INCIDENT' | 'INCIDENT_UPDATED';
 export interface AppNotification {
   id: string; type: NotificationType; title: string; content: string; referenceType: 'SHIPMENT' | 'APPLICATION' | null; referenceId: string | null;
   read: boolean; readAt: string | null; createdAt: string;
