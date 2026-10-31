@@ -1,15 +1,9 @@
-import { APIRequestContext, Page, expect, test } from '@playwright/test';
-import { PASSWORD, button, signIn, uniqueEmail } from './support';
+import { Page, expect, test } from '@playwright/test';
+import { PASSWORD, apiToken, button, isolatePriceTables, signIn, uniqueEmail } from './support';
 
 const adminEmail = process.env['E2E_ADMIN_EMAIL'];
 const adminPassword = process.env['E2E_ADMIN_PASSWORD'];
 const VEHICLE = 'TRUCK_1T';
-
-async function token(request: APIRequestContext, email: string, password: string): Promise<string> {
-  const res = await request.post('/api/v1/auth/login', { data: { identifier: email, password } });
-  expect(res.status(), await res.text()).toBe(200);
-  return (await res.json()).data.accessToken;
-}
 
 /**
  * Full pricing flow with no map provider configured (the default): the quote waits for an admin, who enters a
@@ -20,18 +14,16 @@ test.describe.serial('pricing: price table, manual review, accept', () => {
   let admin: Page;
   let customer: Page;
   let shipmentUrl = '';
+  let restore: () => Promise<void> = async () => undefined;
 
   test.beforeAll(async ({ browser, request }) => {
-    // Re-runnable on the same database: switch off price tables left for this vehicle type by earlier runs.
-    const adminToken = await token(request, adminEmail!, adminPassword!);
-    const headers = { Authorization: `Bearer ${adminToken}` };
-    const list = await (await request.get(`/api/v1/admin/pricing-configs?vehicleTypeCode=${VEHICLE}&active=true&size=100`, { headers })).json();
-    for (const c of list.data.items) await request.patch(`/api/v1/admin/pricing-configs/${c.id}/deactivate`, { headers });
+    // Exclusive use of this vehicle type's price tables; the originals are re-activated afterwards.
+    restore = await isolatePriceTables(await apiToken(request, adminEmail!, adminPassword!), VEHICLE);
 
     // A customer with a priced-ready draft: 10 × 60 kg (600 kg), 3 stops, loading support, 1-tonne truck.
     const email = uniqueEmail('quote');
     await request.post('/api/v1/auth/register/customer', { data: { fullName: 'Khách Báo Giá', email, password: PASSWORD, confirmPassword: PASSWORD } });
-    const customerToken = await token(request, email, PASSWORD);
+    const customerToken = await apiToken(request, email, PASSWORD);
     const pickup = new Date(Date.now() + 2 * 86_400_000);
     pickup.setUTCHours(3, 0, 0, 0);
     const stop = (type: string, seq: number, name: string, phone: string) => ({ stopType: type, sequenceNo: seq, contactName: name, contactPhone: phone, province: 'Hà Nội', addressDetail: `Số ${seq}` });
@@ -52,7 +44,7 @@ test.describe.serial('pricing: price table, manual review, accept', () => {
     await expect(customer).toHaveURL(/\/customer$/);
   });
 
-  test.afterAll(async () => { await admin?.close(); await customer?.close(); });
+  test.afterAll(async () => { await admin?.close(); await customer?.close(); await restore(); });
 
   test('admin creates a price table with a service fee (form rejects negative prices)', async () => {
     await admin.getByRole('link', { name: 'Bảng giá', exact: true }).click();

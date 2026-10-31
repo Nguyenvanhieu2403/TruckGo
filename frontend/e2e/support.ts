@@ -1,4 +1,4 @@
-import { Locator, Page, expect } from '@playwright/test';
+import { APIRequestContext, Locator, Page, expect, request } from '@playwright/test';
 
 export const PASSWORD = 'Example-Password-123';
 
@@ -55,4 +55,34 @@ export async function fillItem(page: Page, index: number, item: { name: string; 
     await page.fill(`#widthCm${index}`, String(item.size[1]));
     await page.fill(`#heightCm${index}`, String(item.size[2]));
   }
+}
+
+/** Logs in through the API and returns an access token. */
+export async function apiToken(request: APIRequestContext, email: string, password: string): Promise<string> {
+  const res = await request.post('/api/v1/auth/login', { data: { identifier: email, password } });
+  expect(res.status(), await res.text()).toBe(200);
+  return (await res.json()).data.accessToken;
+}
+
+/**
+ * Gives a test exclusive use of one vehicle type's price tables: switches off the active ones and returns a restore
+ * function that switches off whatever the test created and re-activates the originals, so shared environments
+ * (e.g. a local stack with sample tables) end up as they were. Uses its own API context so it can run in afterAll.
+ */
+export async function isolatePriceTables(adminToken: string, vehicle: string): Promise<() => Promise<void>> {
+  const api = await request.newContext({ baseURL: process.env['E2E_BASE_URL'] ?? 'http://localhost:4200', extraHTTPHeaders: { Authorization: `Bearer ${adminToken}` } });
+  const active = async (): Promise<string[]> =>
+    (await (await api.get(`/api/v1/admin/pricing-configs?vehicleTypeCode=${vehicle}&active=true&size=100`)).json()).data.items.map((c: { id: string }) => c.id);
+  const originals = await active();
+  for (const id of originals) await api.patch(`/api/v1/admin/pricing-configs/${id}/deactivate`);
+  return async () => {
+    for (const id of await active()) await api.patch(`/api/v1/admin/pricing-configs/${id}/deactivate`);
+    for (const id of originals) expect((await api.patch(`/api/v1/admin/pricing-configs/${id}/activate`)).status()).toBe(200);
+    await api.dispose();
+  };
+}
+
+/** Horizontal overflow of the page in CSS pixels (0 when it fits the viewport). */
+export async function horizontalOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
