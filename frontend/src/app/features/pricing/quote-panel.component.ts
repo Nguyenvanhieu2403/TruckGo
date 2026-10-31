@@ -50,13 +50,12 @@ type Confirm = 'accept' | 'reject' | null;
             <tfoot><tr><th>Tổng giá</th><th class="num total">{{ vnd(q.totalPrice) }}</th></tr></tfoot>
           </table>
           <details class="lines"><summary>Chi tiết từng khoản ({{ q.lines.length }})</summary>
-            <div class="table-wrap"><table class="table">
-              <thead><tr><th>Khoản</th><th>Diễn giải</th><th class="num">SL</th><th class="num">Đơn giá</th><th class="num">Thành tiền</th></tr></thead>
-              <tbody>@for (l of q.lines; track l.lineNo) {
-                <tr><td>{{ l.name }}</td><td class="muted">{{ l.description || '' }}</td><td class="num">{{ l.quantity | number: '1.0-3' }}</td>
-                  <td class="num">{{ vnd(l.unitPrice) }}</td><td class="num">{{ vnd(l.amount) }}</td></tr>
-              }</tbody>
-            </table></div>
+            <ul class="line-list">
+              @for (l of q.lines; track l.lineNo) {
+                <li><div class="line-main"><span>{{ l.name }}</span><span class="num">{{ vnd(l.amount) }}</span></div>
+                  <div class="line-sub muted">@if (l.description) { {{ l.description }} · }{{ l.quantity | number: '1.0-3' }} × {{ vnd(l.unitPrice) }}</div></li>
+              }
+            </ul>
           </details>
           @if (q.adjustmentReason) { <p class="small muted">Điều chỉnh của quản trị viên: {{ q.adjustmentReason }}</p> }
         }
@@ -111,7 +110,8 @@ type Confirm = 'accept' | 'reject' | null;
   styles: [`.quote-head{display:flex;justify-content:space-between;align-items:center;gap:8px}.quote-head h2{margin:0}.small{font-size:12px}.facts{margin:12px 0}
   .breakdown{width:100%;border-collapse:collapse;margin:8px 0 6px;font-size:14px}.breakdown td,.breakdown th{padding:7px 0;border-bottom:1px solid #eef1ea;text-align:left}
   .breakdown tfoot th{border-top:2px solid var(--tg-ink);border-bottom:0;font-size:15px}.num{text-align:right!important;white-space:nowrap}.total{font-size:18px}
-  .lines,.history{margin:10px 0;font-size:13px}.lines summary,.history summary{cursor:pointer;color:var(--tg-muted)}
+  .lines,.history{margin:10px 0;font-size:13px}.line-list{list-style:none;padding:0;margin:8px 0 0}.line-list li{padding:7px 0;border-bottom:1px solid #eef1ea}
+  .line-main{display:flex;justify-content:space-between;gap:12px}.line-sub{font-size:12px;margin-top:2px}.lines summary,.history summary{cursor:pointer;color:var(--tg-muted)}
   .history-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;padding:6px 0;border-bottom:1px solid #eef1ea}
   @media(max-width:560px){.history-row{grid-template-columns:1fr 1fr}}`],
 })
