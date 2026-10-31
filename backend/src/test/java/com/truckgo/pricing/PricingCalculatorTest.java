@@ -143,4 +143,10 @@ class PricingCalculatorTest {
         assertThatThrownBy(() -> PricingCalculator.calculate(rates(), input("10", "-1", "0", 2, List.of()))).isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> PricingCalculator.calculate(rates(), input("10", "0", "0", 1, List.of()))).isInstanceOf(BusinessException.class);
     }
+
+    @Test void descriptionsUseVietnameseNumberFormat() {
+        PricingResult r = PricingCalculator.calculate(rates(List.of(), List.of(), List.of(new PricingRates.ExtraFee("FUEL", "Nhiên liệu", FeeType.PERCENTAGE, d("0"), d("3.5"))), "1500000"),
+                input("18.5", "0", "0", 2, List.of()));
+        assertThat(r.lines()).extracting(QuoteLine::description).contains("18,5 km", "3,5% cước vận chuyển", "Giá tối thiểu 1.500.000 VNĐ");
+    }
 }

@@ -135,5 +135,10 @@ public final class PricingCalculator {
     /** Whole VND, half-up. */
     public static BigDecimal round(BigDecimal value) { return value.setScale(0, RoundingMode.HALF_UP); }
 
-    private static String plain(BigDecimal v) { return v.stripTrailingZeros().toPlainString(); }
+    /** Vietnamese number style for line descriptions shown to customers: 1.234,5 */
+    static String plain(BigDecimal v) {
+        java.text.DecimalFormat format = new java.text.DecimalFormat("#,##0.######", java.text.DecimalFormatSymbols.getInstance(java.util.Locale.forLanguageTag("vi-VN")));
+        format.setRoundingMode(RoundingMode.HALF_UP);
+        return format.format(v);
+    }
 }
