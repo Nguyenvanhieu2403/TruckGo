@@ -11,6 +11,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  forbidOnly: Boolean(process.env['CI']),
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env['E2E_BASE_URL'] ?? 'http://localhost:4200',
