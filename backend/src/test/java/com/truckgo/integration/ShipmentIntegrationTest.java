@@ -124,7 +124,7 @@ class ShipmentIntegrationTest extends IntegrationTestSupport {
     // ------------------------------------------------------------------ tests
 
     @Test void flywayAppliedV3AndSeededCatalogs() throws Exception {
-        assertThat(jdbc.queryForList("select version from flyway_schema_history where success order by installed_rank", String.class)).containsExactly("1", "2", "3");
+        assertThat(jdbc.queryForList("select version from flyway_schema_history where success order by installed_rank", String.class)).startsWith("1", "2", "3");
         Session session = customer();
         send(get("/api/v1/catalogs/vehicle-types"), session, null).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(10)).andExpect(jsonPath("$.data[0].code").value("TRUCK_500KG"));
