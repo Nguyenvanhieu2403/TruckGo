@@ -9,15 +9,20 @@ export interface PageResponse<T> { items: T[]; page: number; size: number; total
 export const API_BASE = '/api/v1';
 
 /** Field errors returned by the backend as `data: { field: message }` on 400/409. */
-export interface ApiError { status: number; message: string; fieldErrors: Record<string, string>; }
+export interface ApiError { status: number; message: string; fieldErrors: Record<string, string>; code?: string; reasons?: string[]; }
 
 export function toApiError(error: unknown): ApiError {
   if (error instanceof HttpErrorResponse) {
     const body = error.error as Partial<ApiResponse<unknown>> | null;
-    const data = body && typeof body.data === 'object' && body.data !== null ? body.data as Record<string, string> : {};
+    const raw = body && typeof body.data === 'object' && body.data !== null ? body.data as Record<string, unknown> : {};
+    // Business errors carry a machine-readable code (and sometimes reasons); everything else is a field error.
+    const code = typeof raw['code'] === 'string' ? raw['code'] : undefined;
+    const reasons = Array.isArray(raw['reasons']) ? (raw['reasons'] as unknown[]).map(String) : undefined;
+    const data: Record<string, string> = {};
+    for (const [key, value] of Object.entries(raw)) if (key !== 'code' && key !== 'reasons' && typeof value === 'string') data[key] = value;
     const fallback = error.status === 0 ? 'Không thể kết nối tới máy chủ' : error.status === 403 ? 'Bạn không có quyền thực hiện thao tác này'
       : error.status === 413 ? 'Tệp vượt quá dung lượng cho phép' : 'Đã xảy ra lỗi, vui lòng thử lại';
-    return { status: error.status, message: body?.message || fallback, fieldErrors: data };
+    return { status: error.status, message: body?.message || fallback, fieldErrors: data, code, reasons };
   }
   return { status: 0, message: 'Đã xảy ra lỗi, vui lòng thử lại', fieldErrors: {} };
 }
