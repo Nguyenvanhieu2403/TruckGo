@@ -1,12 +1,13 @@
-# TruckGo — Sprint 3
+# TruckGo — Sprint 4
 
 Nền tảng kết nối khách hàng thuê xe tải với tài xế.
 
 - Sprint 1: nền tảng kỹ thuật (Angular SPA, Spring Boot, PostgreSQL, Redis, Flyway).
 - Sprint 2: tài khoản, xác thực/phân quyền, hồ sơ người dùng, hồ sơ tài xế, phương tiện, duyệt của quản trị viên.
 - Sprint 3: **quản lý đơn vận chuyển** — wizard 5 bước, nhiều điểm giao, nhiều dòng hàng, tổng trọng lượng/thể tích do máy chủ tính, yêu cầu xe, dịch vụ bổ sung, ảnh hàng hóa trên MinIO, lưu nháp/đăng/sửa/hủy/xóa nháp, lịch sử trạng thái.
+- Sprint 4: **Pricing Engine** — bảng giá theo loại xe do ADMIN quản lý, tính giá theo quãng đường thực tế, khối lượng, thể tích, dịch vụ, điểm dừng, khung giờ và phụ phí khác; báo giá có phiên bản và snapshot, khách xác nhận/từ chối, ADMIN xử lý báo giá thủ công.
 
-Chưa có: tính giá cước (Sprint 4), tài xế tìm/nhận đơn (Sprint 5), GPS, thanh toán, đánh giá.
+Chưa có: tài xế tìm/nhận đơn (Sprint 5), GPS, thanh toán, ví, đối soát, hoa hồng, chat, đánh giá.
 
 ## Kiến trúc
 
@@ -17,7 +18,7 @@ Chưa có: tính giá cước (Sprint 4), tài xế tìm/nhận đơn (Sprint 5)
 - MinIO (S3) lưu ảnh hàng hóa trong bucket riêng tư; PostgreSQL chỉ lưu metadata.
 - Nginx phục vụ SPA và proxy `/api` về backend **cùng origin**, nên cookie refresh `SameSite=Strict` hoạt động không cần CORS.
 
-Package backend (package-by-feature): `auth`, `security`, `user`, `driver`, `vehicle`, `admin`, `catalog` (danh mục + cache), `shipment` (đơn vận chuyển), `storage` (`StorageService` + adapter MinIO), `geo` (abstraction bản đồ), `common`.
+Package backend (package-by-feature): `auth`, `security`, `user`, `driver`, `vehicle`, `admin`, `catalog` (danh mục + cache), `shipment` (đơn vận chuyển), `storage` (`StorageService` + adapter MinIO), `geo` (abstraction bản đồ), `pricing` (`engine` tính giá thuần, `route` quãng đường, `config` bảng giá, `quote` báo giá), `common`.
 
 ## Kiến trúc xác thực
 
@@ -181,6 +182,75 @@ Mã đơn dạng `TG<yyMMdd>-<6 ký tự>` theo ngày giờ Việt Nam, không d
 
 Frontend: `/customer/shipments` (danh sách có tìm kiếm, lọc trạng thái/ngày, sắp xếp, phân trang, skeleton, trạng thái rỗng/lỗi), `/customer/shipments/create`, `/customer/shipments/:id`, `/customer/shipments/:id/edit`; admin `/admin/shipments`, `/admin/shipments/:id` (chỉ xem).
 
+## Định giá vận chuyển (Sprint 4)
+
+Mọi số tiền do **backend** tính và lưu; frontend chỉ hiển thị kết quả API và không bao giờ gửi giá lên. Nếu không đủ dữ liệu tin cậy, hệ thống **không bịa** quãng đường hay giá.
+
+### Công thức
+
+```
+Tổng = Giá mở cửa + Phí quãng đường + Phụ phí khối lượng + Phụ phí thể tích + Phụ phí dịch vụ
+     + Phụ phí điểm dừng + Phụ phí khung giờ + Phụ phí khác (+ bù giá tối thiểu, + điều chỉnh của ADMIN)
+
+Giá mở cửa        = basePrice × số xe
+Phí quãng đường   = max(0, km − includedDistanceKm) × số xe × pricePerKm
+Phụ phí khối lượng = max(0, tổng kg − includedWeightKg × số xe) × pricePerExtraKg
+Phụ phí thể tích  = max(0, tổng m³ − includedVolumeM3 × số xe) × pricePerExtraM3
+Phụ phí điểm dừng = max(0, số điểm dừng − 2) × additionalStopPrice      (ngoài 1 điểm lấy + 1 điểm giao)
+Phí dạng %        = % của (giá mở cửa + phí quãng đường)
+```
+
+Phí dịch vụ dùng **danh mục dịch vụ của Sprint 3** (không tạo danh sách mới): `FIXED` (cố định), `PERCENTAGE` (% cước vận chuyển), `PER_UNIT` (× giá trị số của dịch vụ, vd. số tầng; với dịch vụ khác là × số kiện), `PER_STOP` (× số điểm dừng), `FREE`. Phí cho một lựa chọn cụ thể (vd. `LOADING_SUPPORT=TEAM`) được ưu tiên hơn phí chung; dịch vụ chưa cấu hình phí hiển thị "Miễn phí". Khung giờ áp theo giờ lấy hàng (giờ Việt Nam), hỗ trợ ngày trong tuần và khung qua nửa đêm.
+
+**Làm tròn**: chỉ dùng `BigDecimal`; tiền tệ VND; **mỗi dòng làm tròn tới đồng (HALF_UP)** và tổng = tổng các dòng đã làm tròn, nên tổng luôn khớp chi tiết (DB còn có `CHECK` tổng = tổng các thành phần). Ví dụ đề bài (100.000 + 20 km × 8.000 + 50.000 + 30.000 + 20.000) = **360.000 VNĐ** có test ở cả unit, integration và E2E.
+
+### Quãng đường
+
+`RouteDistanceService.calculateDistance(stops)`:
+- `MAPS_ROUTE_PROVIDER=none` (mặc định) — `ManualRouteDistanceService`: không có quãng đường → báo giá `AWAITING_MANUAL_REVIEW`; ADMIN nhập quãng đường đã xác minh.
+- `MAPS_ROUTE_PROVIDER=google` — Google Directions API, chế độ lái xe, đi qua các điểm theo thứ tự (origin → waypoints → destination), cộng mọi chặng; dùng tọa độ nếu khách nhập, nếu không dùng địa chỉ có cấu trúc. Timeout `MAPS_CONNECT_TIMEOUT`/`MAPS_READ_TIMEOUT`; lỗi, không có tuyến, key bị từ chối hoặc quãng đường bất hợp lý (> `MAPS_MAX_REASONABLE_KM`) → chờ ADMIN. Bật Directions API trong Google Cloud, giới hạn key theo API và IP máy chủ, đặt key qua biến môi trường `GOOGLE_MAPS_API_KEY`; key không bao giờ được ghi log.
+- Không dùng khoảng cách đường chim bay để tính giá.
+
+### Báo giá
+
+Trạng thái `PENDING, CALCULATED, AWAITING_MANUAL_REVIEW, ACCEPTED, REJECTED, EXPIRED, SUPERSEDED` — tách biệt với trạng thái đơn.
+- Mỗi lần tính giá tạo **phiên bản mới bất biến** (`<mã đơn>-Q<n>`) kèm các dòng chi tiết và **snapshot JSON** (đơn giá, dữ liệu đầu vào, tuyến đường). Phiên bản hiện hành trước đó chuyển `SUPERSEDED`; DB bảo đảm mỗi đơn chỉ có một báo giá hiện hành. Đổi bảng giá sau đó không ảnh hưởng báo giá cũ.
+- Tạo phiên bản khóa dòng shipment (`SELECT … FOR UPDATE`) nên request đồng thời không tạo trùng phiên bản.
+- Cần ADMIN khi: không có quãng đường tin cậy, không có bảng giá đang hiệu lực cho loại xe, hoặc xe khách chọn có tải trọng danh nghĩa nhỏ hơn hàng. Nếu khách để "hệ thống gợi ý", chọn loại xe nhỏ nhất có bảng giá và đủ tải trọng danh nghĩa.
+- Đơn phải có kích thước mọi kiện hàng và thời gian lấy hàng mới tính giá được. Chỉ đơn `DRAFT`/`PUBLISHED` được báo giá.
+- Báo giá `CALCULATED` hết hạn sau `QUOTE_VALIDITY` (mặc định 24h); kiểm tra khi đọc/xác nhận/từ chối và lưu `EXPIRED`.
+- `ACCEPTED`: không tính lại, không điều chỉnh; tổng được ghi vào `shipments.estimated_price` (dùng cho Sprint 5). Nếu khách **sửa đơn nháp**, báo giá hiện hành (kể cả đã xác nhận) chuyển `SUPERSEDED` — số liệu cũ giữ nguyên — và khách phải báo giá lại.
+- ADMIN `manual-adjustment`: quãng đường đã xác minh và/hoặc khoản điều chỉnh có dấu (giảm giá là số âm, tổng không được âm), **lý do bắt buộc**; tạo phiên bản mới, lưu người/thời điểm/lý do trên báo giá và trong `admin_audit_logs`. `recalculate` dùng bảng giá hiện hành và giữ quãng đường đã xác minh.
+
+### Bảng giá
+
+Mỗi bảng giá thuộc một **loại xe** (`vehicle_types` của Sprint 3) với thời gian hiệu lực; tại một thời điểm chỉ một bảng giá đang bật cho mỗi loại xe (kiểm tra ở service và exclusion constraint `btree_gist`). Bảng giá hết hạn hoặc chưa tới hạn không được dùng. Không có giá nào được seed sẵn — ADMIN tạo tại `/admin/pricing`. Mọi thay đổi (kể cả phí dịch vụ) ghi `pricing_config_histories` với JSON trước/sau và người thực hiện. Bảng giá đang bật được cache Redis (`pricing:v1:active-configs`, TTL `PRICING_CACHE_TTL`), xóa cache sau khi commit thay đổi; Redis lỗi thì đọc PostgreSQL. Báo giá không bao giờ được cache.
+
+### API định giá (`/api/v1`)
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| POST | `/shipments/{id}/pricing/preview` | Chủ đơn | Tính giá, tạo phiên bản mới |
+| GET | `/shipments/{id}/pricing` | Chủ đơn, ADMIN | Báo giá mới nhất (`data: null` nếu chưa có) |
+| GET | `/shipments/{id}/pricing/history` | Chủ đơn, ADMIN | Các phiên bản |
+| POST | `/shipments/{id}/pricing/accept` · `/reject` | Chủ đơn | `reject` nhận `{reason}` tuỳ chọn |
+| GET/POST | `/admin/pricing-configs` | ADMIN | Danh sách (`vehicleTypeCode`, `active`, phân trang) / tạo |
+| GET/PUT | `/admin/pricing-configs/{id}` | ADMIN | Chi tiết / cập nhật (cần `version`) |
+| PATCH | `/admin/pricing-configs/{id}/activate` · `/deactivate` | ADMIN | |
+| GET | `/admin/pricing-configs/{id}/history` | ADMIN | Lịch sử |
+| GET/POST | `/admin/pricing-service-fees` | ADMIN | `?pricingConfigId=` / tạo |
+| PUT/DELETE | `/admin/pricing-service-fees/{id}` | ADMIN | Cập nhật (cần `version`) / xóa mềm |
+| GET | `/admin/quotes/pending`, `/admin/quotes/{id}` | ADMIN | Báo giá chờ xử lý / chi tiết kèm snapshot |
+| POST | `/admin/quotes/{id}/manual-adjustment` · `/recalculate` | ADMIN | `{distanceKm?, adjustmentAmount?, reason}` |
+
+Frontend: mục **Báo giá** trong chi tiết đơn (tính giá, phân tích chi tiết, hạn hiệu lực, xác nhận/từ chối có hộp thoại xác nhận, lịch sử, giải thích khi chờ ADMIN, không hiển thị giá khi API lỗi); ADMIN: `/admin/pricing`, `/admin/pricing/new`, `/admin/pricing/:id` (form có validation, phí dịch vụ, lịch sử), `/admin/quotes`.
+
+### Cấu hình bảng giá lần đầu
+
+1. Đăng nhập ADMIN → **Bảng giá** → **+ Tạo bảng giá**: chọn loại xe, thời gian hiệu lực, đơn giá; thêm khung giờ/phụ phí khác nếu cần.
+2. Trong trang bảng giá vừa tạo, thêm **phí dịch vụ** cho các dịch vụ thu phí.
+3. Lặp lại cho các loại xe đang phục vụ. Loại xe chưa có bảng giá → báo giá của khách vào **Báo giá chờ xử lý**.
+
 ## Cơ sở dữ liệu
 
 Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_driver_vehicle_tables.sql` (V1 giữ nguyên). Flyway tự chạy khi backend khởi động; database Sprint 1 chỉ có V1 nên V2 được áp dụng tiếp.
@@ -194,6 +264,8 @@ Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_d
 | `admin_audit_logs` | `actor_id`, `action`, `target_type`, `target_id`, `details`, `created_at` |
 
 **V3** `V3__create_shipment_management_tables.sql`: `shipments` (mã đơn unique, chủ đơn, trạng thái, lịch, yêu cầu xe, tổng `NUMERIC`, giá nullable, publish/cancel/soft delete, `version`), `shipment_stops` (PICKUP/DELIVERY, `sequence_no` unique theo đơn — không giới hạn 2 điểm), `shipment_items`, `shipment_services`, `shipment_attachments` (metadata), `shipment_status_histories`, cùng các bảng danh mục và dữ liệu seed. Ràng buộc: số kiện > 0, trọng lượng ≥ 0, kích thước > 0 khi có, vĩ độ ±90, kinh độ ±180, tổng không âm, hạn giao sau giờ lấy, đơn đã đăng phải có `pickup_time ≥ published_at`, đơn hủy phải có lý do, chỉ xóa mềm đơn nháp; index theo `customer_id, created_at`, `status, pickup_time`.
+
+**V4** `V4__create_pricing_engine_tables.sql`: `pricing_configs` (theo `vehicle_types`, thời gian hiệu lực, exclusion constraint), `pricing_service_fees` (theo `shipment_service_definitions`/options), `pricing_time_rules`, `pricing_extra_fees`, `pricing_config_histories` (JSONB), `shipment_quotes` (unique `quote_code` và `(shipment_id, quote_version)`, unique index một báo giá hiện hành/đơn, `CHECK` tổng = tổng thành phần, snapshot JSONB), `shipment_quote_items` (số tiền nguyên đồng). Tiền dùng `NUMERIC`, thời gian `TIMESTAMPTZ`; báo giá không bao giờ bị xóa vật lý.
 
 Mọi thời điểm là `TIMESTAMPTZ` (UTC). Có index cho email, phone, role, status, driver_id, trạng thái duyệt + `submitted_at`. Không có xóa vật lý tài khoản; vô hiệu hóa bằng `SUSPENDED/LOCKED`.
 
@@ -221,6 +293,11 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `SHIPMENT_MIN_PICKUP_LEAD` | `15m` | Khoảng cách tối thiểu từ lúc đăng tới giờ lấy hàng |
 | `SHIPMENT_MAX_ATTACHMENT_SIZE`, `UPLOAD_MAX_FILE_SIZE`, `UPLOAD_MAX_REQUEST_SIZE` | `5MB`, `5MB`, `6MB` | Giới hạn ảnh |
 | `CATALOG_CACHE_TTL` | `1h` | TTL cache danh mục |
+| `MAPS_ROUTE_PROVIDER` | `none` | `none` (ADMIN xác minh quãng đường) hoặc `google` |
+| `GOOGLE_MAPS_API_KEY` | rỗng | Bắt buộc khi `google`; không commit |
+| `GOOGLE_DIRECTIONS_URL`, `MAPS_CONNECT_TIMEOUT`, `MAPS_READ_TIMEOUT`, `MAPS_MAX_REASONABLE_KM` | Google mặc định, `3s`, `5s`, `3000` | |
+| `QUOTE_VALIDITY` | `24h` | Thời hạn báo giá đã tính |
+| `PRICING_CACHE_TTL` | `10m` | TTL cache bảng giá đang bật |
 
 Không commit `.env` hay secret thật.
 
@@ -325,7 +402,18 @@ Phạm vi đã kiểm thử: hash mật khẩu; đăng ký CUSTOMER/DRIVER; bỏ
 
 Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị từ chối; tổng trọng lượng/thể tích chính xác và bỏ qua giá trị client; khách A không xem/sửa/đăng/hủy/xóa đơn khách B (404); tài xế 403; admin chỉ xem; đăng thiếu dữ liệu; không đăng lại; không hủy đơn `COMPLETED`/`ASSIGNED`; không xóa đơn đã đăng; cập nhật nháp thay đúng dữ liệu con, giữ ảnh, xung đột `version`; lịch sử trạng thái; mã đơn unique (DB + retry); UTC và bộ lọc ngày giờ Việt Nam; upload sai định dạng (415), quá dung lượng (413), người khác xóa ảnh (404); object bị xóa khỏi MinIO; cache danh mục trong Redis và xóa cache; Flyway V3; các ràng buộc DB. Frontend: model form và tính tổng, wizard (kiểm tra từng bước, thêm/xóa điểm và hàng, lưu nháp, đăng đơn, sửa nháp, ánh xạ lỗi), danh sách (lọc, phân trang, lỗi, hủy), trang chi tiết, upload ảnh và lỗi.
 
+Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khung giờ qua đêm, làm tròn, giá tối thiểu, điều chỉnh âm, dữ liệu không hợp lệ) và provider Google (nhiều chặng, lỗi, timeout, không lộ key); integration test định giá (ví dụ 360.000, tổng khớp chi tiết, không có/hết hạn bảng giá, provider lỗi → ADMIN nhập quãng đường có audit, quyền truy cập, hết hạn, đã xác nhận không đổi, sửa đơn thay thế báo giá, đồng thời, đổi bảng giá không ảnh hưởng báo giá cũ, validation/trùng thời gian, cache); frontend (panel báo giá, form bảng giá, xử lý báo giá) và E2E luồng định giá.
+
 ## Giới hạn còn tồn tại
+
+**Sprint 4**
+
+- Chưa có job định kỳ chuyển báo giá sang `EXPIRED`; trạng thái hết hạn được áp dụng khi báo giá được đọc/xác nhận/từ chối.
+- Mới có Google Directions; Mapbox/OSRM cần thêm adapter cho `RouteDistanceService`. Không có quota/cache kết quả tuyến đường.
+- Mỗi lần khách bấm "Tính giá" tạo một phiên bản mới; chưa giới hạn tần suất.
+- Đăng đơn chưa bắt buộc có báo giá đã xác nhận (giữ hành vi Sprint 3); Sprint 5 nên dùng `ACCEPTED` làm điều kiện ghép tài xế.
+- Phí dịch vụ áp theo đơn, chưa phân biệt điểm lấy/điểm giao (vd. bốc ở điểm lấy, dỡ ở điểm giao).
+
 
 **Sprint 3**
 
