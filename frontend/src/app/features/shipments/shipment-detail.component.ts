@@ -5,14 +5,16 @@ import { Observable } from 'rxjs';
 import { SelectedService, ShipmentApi, ShipmentDetail } from '../../core/api/shipment.api';
 import { toApiError } from '../../core/api.service';
 import { AttachmentPanelComponent } from './attachment-panel.component';
+import { QuotePanelComponent } from '../pricing/quote-panel.component';
+import { formatVnd } from '../../shared/money';
 import { CancelDialogComponent } from './cancel-dialog.component';
-import { PRICE_PENDING, SHIPMENT_STATUS_LABELS, formatKg, formatM3 } from './shipment-labels';
+import { SHIPMENT_STATUS_LABELS, formatKg, formatM3 } from './shipment-labels';
 import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component';
 
 @Component({
   selector: 'app-shipment-detail',
   standalone: true,
-  imports: [DatePipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent],
+  imports: [DatePipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent],
   template: `
   <main class="container">
     <a [routerLink]="admin() ? '/admin/shipments' : '/customer/shipments'" class="kicker">← Danh sách đơn</a>
@@ -54,6 +56,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
           <app-attachment-panel [shipmentId]="s.id" [initial]="s.attachments" [editable]="s.actions.attachmentsEditable" />
         </div>
         <aside>
+          <app-quote-panel [shipmentId]="s.id" [owner]="!admin()" [shipmentOpen]="s.status === 'DRAFT' || s.status === 'PUBLISHED'" (changed)="reload()" />
           <section class="card"><h2>Tổng quan</h2>
             <dl class="dl compact">
               <dt>Lấy hàng</dt><dd>{{ s.pickupTime ? (s.pickupTime | date: 'HH:mm dd/MM/yyyy') : '—' }}</dd>
@@ -61,7 +64,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
               <dt>Tổng kiện</dt><dd>{{ s.totalQuantity }}</dd><dt>Trọng lượng</dt><dd>{{ kg(s.totalWeightKg) }}</dd><dt>Thể tích</dt><dd>{{ m3(s.totalVolumeM3) }}</dd>
               <dt>Loại xe</dt><dd>{{ s.vehicle.vehicleTypeName || 'Hệ thống gợi ý' }}@if (s.vehicle.vehicleCount > 1) { × {{ s.vehicle.vehicleCount }} }</dd>
               <dt>Loại thùng</dt><dd>{{ s.vehicle.bodyTypeName || 'Không yêu cầu' }}</dd>
-              <dt>Giá cước</dt><dd>{{ s.priceStatus === 'NOT_QUOTED' ? pricePending : s.finalPrice ?? s.estimatedPrice }}</dd>
+              <dt>Giá cước</dt><dd>{{ priceText(s) }}</dd>
             </dl>
           </section>
           <section class="card"><h2>Dịch vụ bổ sung</h2>
@@ -95,12 +98,26 @@ export class ShipmentDetailComponent implements OnInit {
   protected readonly cancelOpen = signal(false);
   protected readonly confirmDelete = signal(false);
   protected readonly statusLabels = SHIPMENT_STATUS_LABELS;
-  protected readonly pricePending = PRICE_PENDING;
+  protected readonly pricePending = 'Chưa có báo giá – bấm "Tính giá" trong mục Báo giá';
   protected readonly kg = formatKg;
   protected readonly m3 = formatM3;
 
-  ngOnInit(): void {
+  ngOnInit(): void { this.reload(); }
+
+  /** Re-reads the order, e.g. after a quote changed its price state. */
+  reload(): void {
     this.api.get(this.route.snapshot.paramMap.get('id') ?? '').subscribe({ next: s => this.shipment.set(s), error: (e: unknown) => this.error.set(toApiError(e).message) });
+  }
+
+  /** Price state from the API; never a number the UI made up. */
+  priceText(s: ShipmentDetail): string {
+    switch (s.priceStatus) {
+      case 'QUOTED': return `${formatVnd(s.estimatedPrice)} (chờ xác nhận)`;
+      case 'ACCEPTED': return `${formatVnd(s.estimatedPrice)} (đã xác nhận)`;
+      case 'FINAL': return formatVnd(s.finalPrice);
+      case 'AWAITING_REVIEW': return 'Đang chờ quản trị viên xác nhận';
+      default: return this.pricePending;
+    }
   }
 
   publish(s: ShipmentDetail): void {

@@ -30,9 +30,14 @@ describe('ShipmentDetailComponent', () => {
   it('shows the order without a made-up price', () => {
     const { el } = render();
     expect(el.textContent).toContain('TG261101-ABCDEF');
-    expect(el.textContent).toContain('Chưa tính giá – sẽ được hệ thống báo giá ở bước tiếp theo');
+    expect(el.textContent).toContain('Chưa có báo giá');
     expect(el.textContent).toContain('Hỗ trợ bốc hàng: Cần đội bốc xếp');
     expect(el.textContent).not.toMatch(/\d+\s?(đ|VND)/);
+  });
+
+  it('shows the price state reported by the API', () => {
+    const { el } = render({ priceStatus: 'ACCEPTED', estimatedPrice: 360000 });
+    expect(el.textContent).toContain('360.000 VNĐ (đã xác nhận)');
   });
 
   it('shows publish errors from the API and keeps the order unchanged', () => {

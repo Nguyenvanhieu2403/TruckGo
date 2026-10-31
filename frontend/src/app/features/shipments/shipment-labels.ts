@@ -5,6 +5,7 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   IN_TRANSIT: 'Đang vận chuyển', DELIVERED: 'Đã giao', COMPLETED: 'Hoàn tất', CANCELLED: 'Đã hủy', EXPIRED: 'Hết hạn',
 };
 
+/** Shown in the order wizard: prices are quoted from the saved order, after this step. */
 export const PRICE_PENDING = 'Chưa tính giá – sẽ được hệ thống báo giá ở bước tiếp theo';
 
 export function formatKg(value: number): string { return `${value.toLocaleString('vi-VN', { maximumFractionDigits: 2 })} kg`; }

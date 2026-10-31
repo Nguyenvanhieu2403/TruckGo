@@ -37,7 +37,7 @@ export interface VehicleRequirement {
 export interface ShipmentDetail {
   id: string; shipmentCode: string; status: ShipmentStatus; customerId: string; pickupTime: string | null; deliveryDeadline: string | null;
   vehicle: VehicleRequirement; totalQuantity: number; totalWeightKg: number; totalVolumeM3: number; customerNote: string | null;
-  priceStatus: 'NOT_QUOTED' | 'QUOTED' | 'FINAL'; estimatedPrice: number | null; finalPrice: number | null;
+  priceStatus: 'NOT_QUOTED' | 'AWAITING_REVIEW' | 'QUOTED' | 'ACCEPTED' | 'FINAL'; estimatedPrice: number | null; finalPrice: number | null;
   pickup: Stop | null; delivery: Stop | null; stops: Stop[]; items: Item[]; services: SelectedService[]; attachments: Attachment[];
   statusHistory: StatusChange[]; warnings: ShipmentWarning[]; actions: ShipmentActions;
   publishedAt: string | null; cancelledAt: string | null; cancellationReason: string | null; createdAt: string; updatedAt: string; version: number;
