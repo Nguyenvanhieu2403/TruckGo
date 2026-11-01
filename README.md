@@ -294,28 +294,56 @@ Frontend: mục **Báo giá** trong chi tiết đơn (tính giá, phân tích ch
 
 ## Marketplace tài xế (Sprint 5)
 
-Tài xế tìm đơn đang mở, gửi yêu cầu nhận đơn bằng một xe của mình; khách hàng chọn một tài xế; đơn chuyển `PUBLISHED → ASSIGNED`.
+Tài xế tìm đơn đang mở, gửi yêu cầu nhận đơn bằng một xe của mình; khách hàng chọn đủ số tài xế đơn cần (mỗi tài xế một xe); đơn chuyển `PUBLISHED → ASSIGNED` khi đã đủ xe.
 
 ### Đơn nào lên Marketplace
 
-Đơn `PUBLISHED`, chưa có tài xế, **cần 1 xe**, có **báo giá đã được khách xác nhận** (`ACCEPTED`) và còn trước **hạn nhận đơn** = giờ lấy hàng − `MARKETPLACE_APPLICATION_CUTOFF` (mặc định 1h). Đơn quá giờ lấy hàng mà chưa chọn tài xế được job định kỳ (`MARKETPLACE_EXPIRY_INTERVAL`, mặc định 5 phút) chuyển sang `EXPIRED`; yêu cầu đang chờ chuyển `EXPIRED` và mọi bên được thông báo.
+Đơn `PUBLISHED` (chưa đủ xe), có **báo giá đã được khách xác nhận** (`ACCEPTED`) và còn trước **hạn nhận đơn** = giờ lấy hàng − `MARKETPLACE_APPLICATION_CUTOFF` (mặc định 1h). Đơn quá giờ lấy hàng mà chưa đủ tài xế được job định kỳ (`MARKETPLACE_EXPIRY_INTERVAL`, mặc định 5 phút) chuyển sang `EXPIRED`; yêu cầu đang chờ chuyển `EXPIRED` và mọi bên được thông báo.
 
 Trước khi được chọn, tài xế chỉ thấy **khu vực** (tỉnh/quận/phường), không thấy địa chỉ chi tiết và số liên hệ; số điện thoại tài xế chỉ hiện cho khách sau khi khách chọn tài xế đó.
 
 ### Điều kiện nhận đơn
 
 - Tài xế: hồ sơ `APPROVED`, tài khoản `ACTIVE`; tối đa `MARKETPLACE_MAX_PENDING_PER_DRIVER` (10) yêu cầu đang chờ; một yêu cầu đang hoạt động mỗi đơn; bị từ chối thì không gửi lại được, đã rút thì được gửi lại.
-- Xe (của chính tài xế, `APPROVED`): đăng kiểm còn hạn tới ngày lấy hàng; tải trọng ≥ tổng khối lượng và ≥ tải trọng tối thiểu; **thuộc hạng xe khách chọn** (tải trọng lớn hơn hạng ngay dưới trong danh mục); thùng ≥ kích thước tối thiểu; từng kiện vừa thùng (được xoay); tổng thể tích ≤ thể tích thùng; thùng đông lạnh/"Cần giữ lạnh" cần xe đông lạnh, container cần xe container. Lý do không đạt được trả về cho tài xế.
+- Xe (của chính tài xế, `APPROVED`): đăng kiểm còn hạn tới ngày lấy hàng; tải trọng ≥ tổng khối lượng (đơn N xe: ≥ phần của mỗi xe = tổng / N) và ≥ tải trọng tối thiểu; **thuộc hạng xe khách chọn** (tải trọng lớn hơn hạng ngay dưới trong danh mục); thùng ≥ kích thước tối thiểu; từng kiện vừa thùng (được xoay); tổng thể tích (hoặc phần của mỗi xe) ≤ thể tích thùng; **loại thùng** đúng yêu cầu của đơn (xem dưới); không trùng lịch với chuyến khác của tài xế hoặc của xe. Lý do không đạt được trả về cho tài xế và cho khách.
+
+### Đơn nhiều xe và phân công (`shipment_assignments`)
+
+`vehicle_count` là số xe (mỗi xe một tài xế) cùng chở một đơn. Mỗi tài xế được chọn là **một dòng phân công** trong `shipment_assignments` (slot 1..N, trạng thái `ACTIVE` / `RELEASED` / `FINISHED`, khoảng bận `busy_period`). Đơn vẫn `PUBLISHED` (còn trên Marketplace, hiện "Cần N xe · đã có M") tới khi đủ N phân công thì chuyển `ASSIGNED`; khi đó các yêu cầu còn chờ bị từ chối ("Đơn đã đủ số xe cần").
+- `shipments.assigned_driver_id/assigned_vehicle_id` giữ **phân công dẫn đầu** (slot nhỏ nhất): tài xế này thực hiện các bước chuyến của Sprint 6 (luồng chuyến không đổi). Tài xế các xe khác thấy địa chỉ/liên hệ trong yêu cầu của mình.
+- Không vượt số xe: mọi thao tác giữ khóa dòng đơn và đếm phân công `ACTIVE`; unique index `(shipment_id, slot_no)`, `(shipment_id, driver_id)`, `(shipment_id, vehicle_id)` cho phân công `ACTIVE` là chốt cuối (một tài xế hay một xe không thể chiếm hai slot của cùng đơn).
+- Đơn một xe giữ nguyên hành vi cũ. Migration V9 tạo phân công cho mọi đơn đã gán trước đó.
+- Hết giờ lấy hàng mà chưa đủ xe: đơn `EXPIRED`, các phân công đã có được gỡ (người thực hiện: hệ thống), tài xế được báo.
+
+### Chống trùng lịch tài xế và xe
+
+Một phân công chiếm tài xế và xe trong `busy_period = [giờ lấy hàng, hạn giao + MARKETPLACE_SCHEDULE_BUFFER)` (không có hạn giao: giờ lấy + `MARKETPLACE_DEFAULT_TRIP_DURATION`, mặc định 8h; đệm mặc định 1h). PostgreSQL bảo đảm bằng **exclusion constraint** (`btree_gist`): `EXCLUDE USING gist (driver_id WITH =, busy_period WITH &&) WHERE (status = 'ACTIVE')`, tương tự cho `vehicle_id`. Hai request đồng thời gán cùng tài xế/xe vào hai chuyến chồng lấn (hai đơn khác nhau, hai khóa dòng khác nhau) không thể cùng commit. Trước đó ứng dụng kiểm tra để báo lỗi rõ ràng (`SCHEDULE_CONFLICT`, kèm mã đơn trùng): khi tài xế gửi yêu cầu, trong danh sách tài xế của khách và **lúc khách chọn**; đơn nhiều xe kiểm tra riêng từng tài xế và xe. Chuyến đã giao (`DELIVERED`) chuyển phân công sang `FINISHED`, tài xế/xe rảnh ngay. Phân công cũ đã trùng lịch từ trước V9 được giữ nhưng không chặn (`busy_period` NULL).
+
+### Loại thùng xe
+
+Dùng danh mục có sẵn `vehicle_body_types` (Thùng lửng, Thùng mui bạt, Thùng kín, Thùng đông lạnh, Container, Sàn phẳng); không tạo enum mới. `vehicles.body_type_code` (FK, không nhận `ANY`): tài xế bắt buộc khai báo khi đăng ký xe; xe đông lạnh phải có thùng đông lạnh, xe container phải là container. Đổi loại thùng của xe đã duyệt đưa xe về chờ duyệt; ADMIN thấy loại thùng khi duyệt. **Xe cũ chưa khai báo** giữ `NULL` (không tự gán): vẫn nhận đơn "Không yêu cầu" loại thùng, không nhận đơn yêu cầu loại thùng cụ thể và được nhắc khai báo; xe chưa khai báo không gửi duyệt được. Đơn yêu cầu loại thùng X cần xe khai báo đúng X; "Cần giữ lạnh" cần thùng đông lạnh.
+
+### Gỡ / thay tài xế
+
+Khách (chủ đơn) hoặc ADMIN gỡ một tài xế (`release`, **lý do bắt buộc**) hoặc thay bằng một tài xế đang chờ (`replace`), chỉ khi đơn `PUBLISHED`/`ASSIGNED` và chuyến chưa bắt đầu (chưa có điểm dừng nào được ghi nhận). `DRIVER_ARRIVED`, `PICKED_UP`, `IN_TRANSIT`… trả `TRIP_ALREADY_STARTED`; khi đang chạy chuyến xử lý theo quy trình sự cố của Sprint 6. Không sửa trực tiếp `assigned_driver_id`: phân công cũ chuyển `RELEASED` (người gỡ, thời điểm, lý do), yêu cầu của tài xế chuyển `RELEASED`, đơn đang `ASSIGNED` quay lại `PUBLISHED` (có lịch sử trạng thái) để tìm tài xế khác; tài xế mới qua đủ kiểm tra hồ sơ, xe, loại thùng và lịch. `shipment_assignment_histories` ghi `ASSIGNED` / `UNASSIGNED` / `REPLACED` kèm lý do và người thực hiện (hoặc tác vụ hệ thống); thao tác của ADMIN ghi thêm `admin_audit_logs`. Tài xế bị gỡ, và khách khi ADMIN gỡ, được thông báo.
+
+### Audit: người dùng hay hệ thống
+
+`shipment_status_histories` và `shipment_assignment_histories` có `actor_type` (`USER` / `SYSTEM`) và `system_actor` (tên tác vụ, vd. `marketplace-expiry-job`); `CHECK` bảo đảm `USER` có người thực hiện, `SYSTEM` thì không. Job hết hạn không còn ghi chủ đơn làm người thực hiện. Migration V9 sửa các dòng cũ do job này ghi (nhận diện đúng lý do "Hệ thống: quá giờ lấy hàng mà chưa chọn tài xế") thành `SYSTEM`; các dòng khác giữ nguyên.
 
 ### Chống gán trùng
 
-`accept` khóa dòng đơn (`SELECT … FOR UPDATE`, dùng chung với gửi yêu cầu, hủy đơn và xác nhận báo giá), kiểm tra lại đơn/yêu cầu/tài xế/xe dưới khóa, rồi gán bằng **câu lệnh cập nhật có điều kiện** (`… WHERE status = 'PUBLISHED' AND assigned_driver_id IS NULL`); **unique index** `uq_driver_applications_accepted` là chốt cuối. Các yêu cầu khác bị từ chối trong cùng transaction, ghi lịch sử trạng thái + lịch sử phân công, tạo thông báo. Test tích hợp chạy 6 lượt chọn đồng thời: đúng 1 thành công.
+`accept` khóa dòng đơn (`SELECT … FOR UPDATE`, dùng chung với gửi yêu cầu, hủy đơn và xác nhận báo giá), kiểm tra lại đơn/yêu cầu/tài xế/xe/lịch dưới khóa, chèn phân công (unique + exclusion constraints là chốt cuối), và khi đủ xe thì chuyển đơn bằng **câu lệnh cập nhật có điều kiện** (`… WHERE status = 'PUBLISHED' AND assigned_driver_id IS NULL`). Lịch sử trạng thái, lịch sử phân công và thông báo ghi trong cùng transaction. Test tích hợp: 6 lượt chọn đồng thời cho đơn một xe → đúng 1; 4 lượt cho xe cuối của đơn hai xe → đúng 1; cùng tài xế được hai khách chọn cùng lúc cho hai chuyến chồng lấn → 1 thành công, 1 `SCHEDULE_CONFLICT`.
 
-Mã lỗi nghiệp vụ trả về ở `data.code`: `SHIPMENT_ALREADY_ASSIGNED`, `SHIPMENT_NOT_AVAILABLE`, `APPLICATION_NOT_PENDING`, `DRIVER_NOT_ELIGIBLE`, `VEHICLE_NOT_ELIGIBLE` (kèm `data.reasons`), `ALREADY_APPLIED`, `APPLICATION_REJECTED_BEFORE`, `APPLICATION_LIMIT_REACHED`.
+Mã lỗi nghiệp vụ trả về ở `data.code`: `SHIPMENT_ALREADY_ASSIGNED`, `SHIPMENT_NOT_AVAILABLE`, `APPLICATION_NOT_PENDING`, `DRIVER_NOT_ELIGIBLE`, `VEHICLE_NOT_ELIGIBLE` (kèm `data.reasons`), `ALREADY_APPLIED`, `APPLICATION_REJECTED_BEFORE`, `APPLICATION_LIMIT_REACHED`, `SCHEDULE_CONFLICT` (kèm `data.reasons`), `DRIVER_ALREADY_ON_SHIPMENT`, `VEHICLE_ALREADY_ON_SHIPMENT`, `ASSIGNMENT_NOT_ACTIVE`, `TRIP_ALREADY_STARTED`.
+
+### Thông báo realtime
+
+PostgreSQL vẫn là bản lưu chính thức. Sau khi transaction commit, thông báo được publish lên Redis Pub/Sub (`truckgo:notifications`, mỗi tin ghi một người nhận); instance nào đang giữ luồng của người đó sẽ đẩy xuống. Không broadcast: mỗi người chỉ nhận thông báo của mình. Luồng `GET /notifications/stream` (SSE qua `fetch` có `Authorization`), sự kiện `notification` có `id`, heartbeat `NOTIFICATION_HEARTBEAT` (25s), đóng sau `NOTIFICATION_STREAM_TIMEOUT` (10 phút) để dùng token mới; client tự kết nối lại với backoff. Kết nối lại gửi `Last-Event-ID`, server **phát lại** các thông báo đã lưu sau id đó (tối đa `NOTIFICATION_REPLAY_LIMIT`), nên mất kết nối không mất thông báo; client loại trùng theo id. **Idempotent**: mỗi sự kiện nghiệp vụ có `event_key` (vd. `APPLICATION_ACCEPTED:<id>`), unique theo người nhận, nên sự kiện bị xử lý lại không tạo thông báo thứ hai. Redis lỗi: thông báo vẫn lưu, luồng trên chính instance vẫn nhận, nơi khác nhận khi kết nối lại hoặc polling. Frontend vẫn polling số chưa đọc mỗi 60s khi luồng đóng (5 phút khi luồng mở). Sự kiện: tài xế gửi/rút yêu cầu, khách chọn/từ chối, tài xế được chọn/không được chọn, đơn đủ tài xế, tài xế bị gỡ, đơn hết hạn/hủy, trạng thái chuyến.
 
 ### Cache
 
-Trang danh sách Marketplace (dữ liệu chung, không có trạng thái riêng của tài xế) được cache trong Redis `MARKETPLACE_CACHE_TTL` (30s). Key có số thế hệ; đăng đơn, xác nhận giá, chọn tài xế, hủy, hết hạn tăng thế hệ sau commit nên mọi trang cũ bị bỏ. Redis lỗi thì đọc thẳng PostgreSQL.
+Trang danh sách Marketplace (dữ liệu chung, không có trạng thái riêng của tài xế) được cache trong Redis `MARKETPLACE_CACHE_TTL` (30s). Key có số thế hệ; đăng đơn, xác nhận giá, chọn tài xế (từng slot), gỡ/thay tài xế, hủy, hết hạn tăng thế hệ sau commit nên mọi trang cũ bị bỏ. Cache **không bao giờ** dùng để quyết định: gửi yêu cầu và phân công luôn đọc lại PostgreSQL dưới khóa. Redis lỗi thì đọc thẳng PostgreSQL.
 
 ### API Marketplace (`/api/v1`)
 
@@ -327,12 +355,18 @@ Trang danh sách Marketplace (dữ liệu chung, không có trạng thái riêng
 | GET | `/driver/applications/my`, `/driver/applications/{id}` | DRIVER | Yêu cầu của tôi |
 | POST | `/driver/applications/{id}/withdraw` | DRIVER | Rút yêu cầu đang chờ |
 | GET | `/customer/shipments/{id}/applications[/{applicationId}]` | CUSTOMER | Tài xế ứng tuyển (chủ đơn) |
-| POST | `/customer/shipments/{id}/applications/{applicationId}/accept\|reject` | CUSTOMER | Chọn / từ chối (`{reason}`) |
+| POST | `/customer/shipments/{id}/applications/{applicationId}/accept\|reject` | CUSTOMER | Chọn (một slot) / từ chối (`{reason}`) |
+| GET | `/customer/shipments/{id}/assignments` | CUSTOMER | Số xe cần/đã có/còn thiếu, các phân công, lịch sử |
+| POST | `/customer/shipments/{id}/assignments/{assignmentId}/release` | CUSTOMER | Gỡ tài xế `{reason}` (trước khi chuyến bắt đầu) |
+| POST | `/customer/shipments/{id}/assignments/{assignmentId}/replace` | CUSTOMER | Thay bằng yêu cầu đang chờ `{applicationId, reason}` |
 | GET | `/notifications`, `/notifications/unread-count` | Đã đăng nhập | Thông báo của tôi |
+| GET | `/notifications/stream` | Đã đăng nhập | SSE realtime; `Last-Event-ID` để phát lại |
 | PATCH | `/notifications/{id}/read`, `/notifications/read-all` | Đã đăng nhập | Đánh dấu đã đọc |
-| GET | `/admin/marketplace/shipments`, `/applications[/{id}]`, `/assignments` | ADMIN | Theo dõi |
+| GET | `/admin/marketplace/shipments` (`understaffed=true`: đơn chưa đủ tài xế), `/applications[/{id}]`, `/assignments` | ADMIN | Theo dõi |
+| GET | `/admin/marketplace/shipments/{id}/assignments`, `/admin/marketplace/schedules?driverId&vehicleId&from&to` | ADMIN | Phân công của đơn; lịch bận tài xế/xe |
+| POST | `/admin/marketplace/shipments/{id}/assignments/{assignmentId}/release\|replace` | ADMIN | Gỡ / thay tài xế (ghi audit) |
 
-Giao diện: `/driver/marketplace`, `/driver/marketplace/:shipmentId`, `/driver/applications`, `/driver/applications/:applicationId`; khung "Tài xế muốn nhận đơn" trong chi tiết đơn của khách; `/admin/marketplace`; chuông thông báo trên thanh điều hướng (cập nhật mỗi 60s).
+Giao diện: `/driver/marketplace`, `/driver/marketplace/:shipmentId`, `/driver/applications`, `/driver/applications/:applicationId`; trong chi tiết đơn của khách: "Tài xế muốn nhận đơn" (chọn nhiều tài xế, tiến độ) và "Phân công tài xế" (tiến độ, gỡ/thay có lý do, lịch sử); `/driver/vehicles` khai báo loại thùng và cảnh báo xe chưa khai báo; `/admin/marketplace` (lọc đơn chưa đủ tài xế, lịch sử có lý do và tác vụ hệ thống, tab "Lịch tài xế & xe"); ADMIN gỡ tài xế từ chi tiết đơn; chuông thông báo nhận realtime.
 
 ## Thực hiện chuyến và theo dõi GPS (Sprint 6)
 
@@ -405,6 +439,8 @@ Migration mới: `backend/src/main/resources/db/migration/V2__create_auth_user_d
 
 **V4** `V4__create_pricing_engine_tables.sql`: `pricing_configs` (theo `vehicle_types`, thời gian hiệu lực, exclusion constraint), `pricing_service_fees` (theo `shipment_service_definitions`/options), `pricing_time_rules`, `pricing_extra_fees`, `pricing_config_histories` (JSONB), `shipment_quotes` (unique `quote_code` và `(shipment_id, quote_version)`, unique index một báo giá hiện hành/đơn, `CHECK` tổng = tổng thành phần, snapshot JSONB), `shipment_quote_items` (số tiền nguyên đồng). Tiền dùng `NUMERIC`, thời gian `TIMESTAMPTZ`; báo giá không bao giờ bị xóa vật lý.
 
+**V9** `V9__marketplace_completion.sql`: `shipment_assignments` (một dòng mỗi xe của đơn, slot, `busy_period TSTZRANGE`, exclusion constraint theo tài xế và theo xe, unique theo đơn), backfill phân công cho đơn đã gán; bỏ unique "một yêu cầu được chấp nhận mỗi đơn", thêm trạng thái yêu cầu `RELEASED`; `actor_type`/`system_actor` cho `shipment_status_histories` và `shipment_assignment_histories` (`changed_by`/`performed_by` cho phép NULL chỉ với `SYSTEM`); `assignment_id` và hành động `REPLACED` trong lịch sử phân công; `vehicles.body_type_code` (FK danh mục loại thùng, NULL = chưa khai báo); `notifications.event_key` unique theo người nhận.
+
 Mọi thời điểm là `TIMESTAMPTZ` (UTC). Có index cho email, phone, role, status, driver_id, trạng thái duyệt + `submitted_at`. Không có xóa vật lý tài khoản; vô hiệu hóa bằng `SUSPENDED/LOCKED`.
 
 ## Cấu hình
@@ -447,6 +483,8 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `MARKETPLACE_MAX_PENDING_PER_DRIVER` | `10` | Số yêu cầu đang chờ tối đa của một tài xế |
 | `MARKETPLACE_CACHE_TTL` | `30s` | TTL cache danh sách Marketplace |
 | `MARKETPLACE_EXPIRY_INTERVAL` | `5m` | Chu kỳ job chuyển đơn quá hạn sang `EXPIRED` |
+| `MARKETPLACE_SCHEDULE_BUFFER` / `MARKETPLACE_DEFAULT_TRIP_DURATION` | `1h` / `8h` | Khoảng đệm giữa hai chuyến; thời lượng chuyến khi đơn không có hạn giao |
+| `NOTIFICATION_STREAM_TIMEOUT` / `NOTIFICATION_HEARTBEAT` / `NOTIFICATION_REPLAY_LIMIT` | `10m` / `25s` / `100` | Luồng thông báo realtime |
 | `MAPS_GEOCODING_PROVIDER` | `none` | `google` bật tìm địa chỉ/geocoding (cần `GOOGLE_MAPS_API_KEY`) |
 | `MAPS_CONNECT_TIMEOUT` / `MAPS_READ_TIMEOUT` | `3s` / `5s` | Timeout gọi Google (Directions và Geocoding) |
 | `MAPS_GEOCODING_CACHE_TTL` / `MAPS_GEOCODING_SEARCHES_PER_MINUTE` | `24h` / `30` | Cache kết quả, giới hạn lượt tìm mỗi người dùng |
@@ -579,7 +617,7 @@ Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị t�
 
 Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khung giờ qua đêm, làm tròn, giá tối thiểu, điều chỉnh âm, dữ liệu không hợp lệ) và provider Google (nhiều chặng, lỗi, timeout, không lộ key); integration test định giá (ví dụ 360.000, tổng khớp chi tiết, không có/hết hạn bảng giá, provider lỗi → ADMIN nhập quãng đường có audit, quyền truy cập, hết hạn, đã xác nhận không đổi, sửa đơn thay thế báo giá, đồng thời, đổi bảng giá không ảnh hưởng báo giá cũ, validation/trùng thời gian, cache); frontend (panel báo giá, form bảng giá, xử lý báo giá) và E2E luồng định giá. Hoàn thiện Sprint 4 thêm: provider Mapbox/OSRM/Google (thử lại chỉ lỗi tạm thời, quota), cache tuyến (hit/miss, thứ tự điểm, version, không cache lỗi, Redis lỗi, 6 request đồng thời → 1 lần gọi), phí dịch vụ theo điểm, integration test job hết hạn (3 luồng song song, không đụng trạng thái khác, API trả `EXPIRED`), dùng lại báo giá + 429/`Retry-After`, validation dịch vụ theo điểm, chặn chọn tài xế khi chưa có báo giá `ACCEPTED`; frontend: tách phí theo đơn/điểm, tự cập nhật khi hết hạn, đếm ngược rate limit, dịch vụ theo điểm trong form.
 
-Sprint 5 thêm: unit test điều kiện xe (duyệt, đăng kiểm, hạng xe, xoay kiện, thể tích, đông lạnh/container) và bộ lọc Marketplace; integration test luồng đầy đủ, 6 lượt chọn đồng thời, các mã lỗi, quyền sở hữu/vai trò, rút/từ chối, hủy và hết hạn đóng yêu cầu, thông báo, admin, xóa cache; frontend (danh sách/chi tiết Marketplace, khung chọn tài xế, chuông thông báo) và E2E Marketplace.
+Sprint 5 thêm: unit test điều kiện xe (duyệt, đăng kiểm, hạng xe, xoay kiện, thể tích, đông lạnh/container) và bộ lọc Marketplace; integration test luồng đầy đủ, 6 lượt chọn đồng thời, các mã lỗi, quyền sở hữu/vai trò, rút/từ chối, hủy và hết hạn đóng yêu cầu, thông báo, admin, xóa cache; frontend (danh sách/chi tiết Marketplace, khung chọn tài xế, chuông thông báo) và E2E Marketplace. Hoàn thiện Sprint 5 thêm: đơn nhiều xe (từng slot, không vượt số xe, 4 lượt đồng thời cho xe cuối), trùng lịch tài xế (chọn đồng thời hai chuyến chồng lấn) và xe (exclusion constraint), loại thùng, xe chưa duyệt, gỡ/thay tài xế trước chuyến và chặn khi `IN_TRANSIT`, giao xong giải phóng lịch, job hết hạn ghi `SYSTEM`, thông báo realtime (SSE, phát lại theo `Last-Event-ID`, không trùng `event_key`), Redis Pub/Sub hai instance; frontend (tiến độ phân công, gỡ/thay, loại thùng, chuông realtime) và E2E đơn hai xe.
 
 Hoàn thiện Sprint 3 thêm: unit test geocoding (Google thành công/không kết quả/lỗi/key bị từ chối, chỉ kết quả chính xác mới điền tọa độ, không ghi đè tọa độ người dùng, kết quả ngoài vùng bị loại, không có provider), job dọn mồ côi (giữ object mới/có metadata, dry-run, DB lỗi không xóa, ngưỡng an toàn, giới hạn mỗi lượt), backoff hàng đợi; integration test trên PostgreSQL + MinIO thật: hủy đơn xóa ảnh sau commit và giữ nguyên khi rollback, MinIO lỗi rồi thử lại tới khi xóa xong, DB lỗi sau upload không để lại object, MinIO lỗi khi upload trả 503, ảnh 4,9 MB qua stream, quyền truy cập, giới hạn 10 ảnh, quét mồ côi chỉ xóa object không ai tham chiếu, API geocoding khi chưa cấu hình; frontend ô tìm địa chỉ; E2E vòng đời ảnh.
 
@@ -599,12 +637,12 @@ Sprint 6 thêm: unit test chuyển trạng thái, điểm dừng, tọa độ, O
 
 **Sprint 5**
 
-- Đơn cần nhiều xe (`vehicleCount > 1`) chưa lên Marketplace (admin vẫn thấy).
-- Chưa kiểm tra trùng lịch của xe/tài xế giữa các đơn đã nhận.
-- Sprint 2 không lưu loại thùng của xe nên chỉ kiểm tra được đông lạnh và container, chưa kiểm tra thùng lửng/bạt/kín.
-- Thông báo trong app lưu ở PostgreSQL, cập nhật bằng polling 60s; chưa có WebSocket/push/email.
-- Đơn hết hạn do hệ thống: lịch sử trạng thái ghi người thực hiện là chủ đơn kèm lý do "Hệ thống" (cột người thực hiện là bắt buộc).
-- Chưa có gỡ tài xế/đổi tài xế sau khi gán và chưa có các trạng thái sau `ASSIGNED` (Sprint sau). Đơn `ASSIGNED` không hủy được.
+- Đơn nhiều xe dùng **một luồng chuyến** (Sprint 6) do tài xế dẫn đầu thực hiện; các xe còn lại chưa có màn hình chuyến/GPS/OTP riêng.
+- Lịch bận tính từ giờ lấy hàng tới hạn giao (hoặc thời lượng mặc định) + đệm; không tính thời gian di chuyển giữa hai chuyến theo bản đồ.
+- Phân công cũ đã trùng lịch trước V9 không bị chặn (giữ nguyên dữ liệu); phân công mới luôn được kiểm tra.
+- Thay tài xế một bước chỉ chọn trong các yêu cầu đang chờ; khi đơn đã đủ xe các yêu cầu khác đã bị từ chối, nên thường phải gỡ tài xế rồi chờ tài xế mới gửi yêu cầu.
+- Đơn `ASSIGNED` vẫn không hủy được (quy tắc Sprint 3); muốn hủy thì gỡ tài xế trước.
+- Luồng SSE giữ trong bộ nhớ từng instance (fan-out qua Redis Pub/Sub); chưa có push mobile/email.
 - Danh sách cache tối đa 30s nên một đơn vừa qua hạn nhận có thể còn hiện tới 30s; gửi yêu cầu luôn kiểm tra lại nên không nhận nhầm.
 - Chưa có ảnh đại diện/đánh giá tài xế (chưa có dữ liệu); hiển thị số chuyến hoàn thành thật.
 
