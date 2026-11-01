@@ -36,7 +36,7 @@ import { LeaveConfirmable } from './unsaved-changes.guard';
       @if (error()) { <div class="alert alert-error" role="alert">{{ error() }}</div> }
       @if (notice()) { <div class="alert alert-success" role="status">{{ notice() }}</div> }
       @switch (step()) {
-        @case (0) { <app-stops-step [form]="form" /> }
+        @case (0) { <app-stops-step [form]="form" [catalog]="services()" /> }
         @case (1) {
           <app-items-step [form]="form" [categories]="categories()" />
           @if (shipmentId(); as id) { <app-attachment-panel [shipmentId]="id" [initial]="attachments()" [editable]="true" /> }

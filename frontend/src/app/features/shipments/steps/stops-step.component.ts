@@ -1,7 +1,8 @@
 import { Component, input } from '@angular/core';
 import { AbstractControl, ReactiveFormsModule } from '@angular/forms';
 import { fieldError } from '../../../shared/form-utils';
-import { ShipmentForm, stopForm } from '../shipment-form';
+import { ShipmentForm, StopForm, stopForm } from '../shipment-form';
+import { ServiceDefinition, allowedAtStop } from '../../../core/api/catalog.api';
 import { AddressSearchComponent } from './address-search.component';
 
 const MESSAGES = { required: 'Trường này là bắt buộc', maxlength: 'Giá trị quá dài', pattern: 'Số điện thoại di động không hợp lệ', min: 'Giá trị ngoài phạm vi', max: 'Giá trị ngoài phạm vi' };
@@ -73,16 +74,54 @@ const MESSAGES = { required: 'Trường này là bắt buộc', maxlength: 'Giá
             </div>
             <p class="hint muted">Có thể bỏ trống. Hệ thống chỉ tự điền tọa độ khi dịch vụ bản đồ tìm được đúng địa chỉ, không bao giờ tự đoán.</p>
           </details>
+          @if (stopServices(stop.controls.stopType.value); as defs) {
+            @if (defs.length) {
+              <fieldset class="stop-services" [attr.aria-label]="'Dịch vụ tại điểm ' + (i + 1)">
+                <legend>Dịch vụ tại điểm này <span class="muted">(tính phí riêng cho từng điểm)</span></legend>
+                @for (d of defs; track d.code) {
+                  <div class="field">
+                    <label [for]="'svc-' + i + '-' + d.code">{{ d.name }}</label>
+                    @if (d.valueType === 'OPTION') {
+                      <select [id]="'svc-' + i + '-' + d.code" [value]="stop.controls.services.value[d.code] ?? ''" (change)="setStopService(stop, d.code, $any($event.target).value)">
+                        <option value="">Không cần</option>
+                        @for (o of d.options; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
+                      </select>
+                    } @else {
+                      <input type="checkbox" [id]="'svc-' + i + '-' + d.code" [checked]="stop.controls.services.value[d.code] === 'true'"
+                             (change)="setStopService(stop, d.code, $any($event.target).checked ? 'true' : '')" />
+                    }
+                  </div>
+                }
+                @if (stop.controls.services.errors?.['server']; as e) { <span class="error">{{ e }}</span> }
+              </fieldset>
+            }
+          }
           <div class="field"><label [for]="'note' + i">Ghi chú cho tài xế</label><input [id]="'note' + i" formControlName="note" /></div>
         </section>
       }
     </div>
     <button class="btn btn-ghost" type="button" (click)="addDelivery()" [disabled]="form().controls.stops.length >= maxStops">+ Thêm điểm giao</button>
   </div>`,
-  styles: [`.stop-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.stop-head h2{margin:0 0 16px}.coords{margin-bottom:14px}.coords summary{cursor:pointer;font-size:13px;color:var(--tg-muted);margin-bottom:12px}`],
+  styles: [`.stop-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.stop-head h2{margin:0 0 16px}.coords{margin-bottom:14px}.stop-services{border:1px dashed var(--tg-line);border-radius:6px;padding:8px 12px 0;margin:0 0 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0 14px}.stop-services legend{font-size:13px;font-weight:600;padding:0 4px}.coords summary{cursor:pointer;font-size:13px;color:var(--tg-muted);margin-bottom:12px}`],
 })
 export class StopsStepComponent {
   readonly form = input.required<ShipmentForm>();
+  /** Service catalog; services that may be ordered per stop are offered on each stop. */
+  readonly catalog = input<ServiceDefinition[]>([]);
+
+  stopServices(type: 'PICKUP' | 'DELIVERY'): ServiceDefinition[] {
+    return this.catalog().filter(d => allowedAtStop(d, type) && (d.valueType === 'OPTION' || d.valueType === 'BOOLEAN'));
+  }
+
+  setStopService(stop: StopForm, code: string, value: string): void {
+    const next = { ...stop.controls.services.value };
+    if (value) {
+      next[code] = value;
+      this.form().controls.services.get(code)?.setValue(null);   // per stop replaces the order-wide choice (no double charge)
+    } else delete next[code];
+    stop.controls.services.setValue(next);
+    stop.controls.services.markAsDirty();
+  }
   protected readonly maxStops = 10;
 
   err(control: AbstractControl): string | null { return fieldError(control, MESSAGES); }

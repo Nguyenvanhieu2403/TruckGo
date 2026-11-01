@@ -76,4 +76,16 @@ describe('shipment form model', () => {
     expect(form.controls.items.at(0).controls.category.errors?.['server']).toBe('Loại hàng không hợp lệ');
     expect(form.controls.services.controls['UPSTAIRS_DELIVERY'].errors?.['server']).toBe('Ngoài phạm vi');
   });
+
+  it('sends per-stop services with their stop and maps their server errors back to that stop', () => {
+    const form = shipmentForm();
+    ensureServiceControls(form, SERVICES);
+    form.controls.stops.at(1).controls.services.setValue({ UNLOADING_SUPPORT: 'true', LOADING_SUPPORT: '' });
+    const payload = toPayload(form, SERVICES);
+    expect(payload.stops[0].services).toEqual([]);
+    expect(payload.stops[1].services).toEqual([{ serviceCode: 'UNLOADING_SUPPORT', serviceValue: 'true' }]);
+    const result = applyServerErrors(form, { 'stops[1].services[0].serviceCode': 'Dịch vụ không áp dụng cho điểm giao' }, payload);
+    expect(result.step).toBe(0);
+    expect(form.controls.stops.at(1).controls.services.errors?.['server']).toBe('Dịch vụ không áp dụng cho điểm giao');
+  });
 });

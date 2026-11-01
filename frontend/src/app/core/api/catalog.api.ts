@@ -11,6 +11,13 @@ export type ServiceGroup = 'LOADING' | 'SITE' | 'GOODS' | 'OTHER';
 export interface ServiceDefinition {
   code: string; name: string; group: ServiceGroup; valueType: ServiceValueType; description: string | null;
   exclusiveGroup: string | null; minValue: number | null; maxValue: number | null; options: { value: string; label: string }[];
+  /** ORDER (whole order), STOP (per stop) or BOTH; stopTypes says which stops (PICKUP, DELIVERY, ANY). */
+  appliesTo?: 'ORDER' | 'STOP' | 'BOTH'; stopTypes?: 'PICKUP' | 'DELIVERY' | 'ANY' | null;
+}
+
+/** Whether a service can be ordered at a stop of this type. */
+export function allowedAtStop(def: ServiceDefinition, stopType: 'PICKUP' | 'DELIVERY'): boolean {
+  return (def.appliesTo === 'STOP' || def.appliesTo === 'BOTH') && (def.stopTypes === 'ANY' || def.stopTypes === stopType);
 }
 
 /**

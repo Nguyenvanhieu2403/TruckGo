@@ -48,7 +48,8 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
               <div class="stop"><span class="badge" [class.badge--approved]="stop.stopType === 'PICKUP'">{{ stop.stopType === 'PICKUP' ? 'Lấy hàng' : 'Giao hàng' }}</span>
                 <div><strong>{{ stop.contactName }}</strong> · {{ stop.contactPhone }}<br>{{ stop.fullAddress }}
                   @if (stop.latitude !== null) { <br><span class="muted">GPS {{ stop.latitude }}, {{ stop.longitude }}</span> }
-                  @if (stop.note) { <br><em class="muted">{{ stop.note }}</em> }</div></div>
+                  @if (stop.note) { <br><em class="muted">{{ stop.note }}</em> }
+                  @if (stop.services?.length) { <br><span class="small" data-testid="stop-services">Dịch vụ tại điểm: @for (sv of stop.services; track sv.serviceCode; let last = $last) { {{ sv.serviceName }}@if (sv.serviceValue !== 'true') { ({{ sv.serviceValue }}) }@if (!last) {, } }</span> }</div></div>
             }
           </section>
           <section class="card"><h2>Hàng hóa</h2>

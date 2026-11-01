@@ -7,7 +7,9 @@ export type QuoteStatus = 'PENDING' | 'CALCULATED' | 'AWAITING_MANUAL_REVIEW' | 
 export type PriceComponent = 'BASE' | 'DISTANCE' | 'WEIGHT' | 'VOLUME' | 'SERVICE' | 'STOP' | 'TIME' | 'OTHER';
 export type FeeType = 'FIXED' | 'PERCENTAGE' | 'PER_UNIT' | 'PER_STOP' | 'FREE';
 
-export interface QuoteLine { lineNo: number; component: PriceComponent; code: string; name: string; description: string | null; quantity: number; unitPrice: number; amount: number; }
+/** appliesTo ORDER = whole order; STOP = service at the stops listed in stopSequences. */
+export interface QuoteLine { lineNo: number; component: PriceComponent; code: string; name: string; description: string | null; quantity: number; unitPrice: number; amount: number;
+  appliesTo?: 'ORDER' | 'STOP'; stopSequences?: number[] | null; }
 export interface QuoteBreakdown {
   basePrice: number; distancePrice: number; weightSurcharge: number; volumeSurcharge: number; serviceSurcharge: number;
   additionalStopSurcharge: number; timeSurcharge: number; otherSurcharge: number;

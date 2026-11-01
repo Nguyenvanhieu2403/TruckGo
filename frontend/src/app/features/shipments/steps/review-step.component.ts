@@ -18,7 +18,8 @@ import { PRICE_PENDING, formatKg, formatM3 } from '../shipment-labels';
       <div class="review-stop">
         <span class="badge" [class.badge--approved]="s.stopType === 'PICKUP'">{{ s.stopType === 'PICKUP' ? 'Lấy hàng' : 'Giao hàng' }}</span>
         <div><strong>{{ s.contactName }}</strong> · {{ s.contactPhone }}<br><span class="muted">{{ address(s) }}</span>
-          @if (s.note) { <br><em class="muted">Ghi chú: {{ s.note }}</em> }</div>
+          @if (s.note) { <br><em class="muted">Ghi chú: {{ s.note }}</em> }
+          @if (s.services?.length) { <br><span class="small">Dịch vụ tại điểm: @for (sv of s.services; track sv.serviceCode; let last = $last) { {{ serviceText(sv.serviceCode, sv.serviceValue) }}@if (!last) {, } }</span> }</div>
       </div>
     }
     <dl class="dl" style="margin-top:14px">

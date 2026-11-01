@@ -7,6 +7,8 @@ export type StopForm = FormGroup<{
   stopType: FormControl<StopType>; contactName: FormControl<string>; contactPhone: FormControl<string>; province: FormControl<string>;
   district: FormControl<string>; ward: FormControl<string>; addressDetail: FormControl<string>;
   latitude: FormControl<number | null>; longitude: FormControl<number | null>; note: FormControl<string>;
+  /** Stop-level services: service code → chosen value (empty = not ordered). */
+  services: FormControl<Record<string, string>>;
 }>;
 export type ItemForm = FormGroup<{
   itemName: FormControl<string>; category: FormControl<string>; description: FormControl<string>; quantity: FormControl<number | null>;
@@ -66,6 +68,7 @@ export function stopForm(type: StopType): StopForm {
     latitude: num(null, Validators.min(-90), Validators.max(90)),
     longitude: num(null, Validators.min(-180), Validators.max(180)),
     note: text('', Validators.maxLength(500)),
+    services: new FormControl<Record<string, string>>({}, { nonNullable: true }),
   }, { validators: coordinatesTogether });
 }
 
@@ -157,6 +160,7 @@ export function toPayload(form: ShipmentForm, catalog: ServiceDefinition[], vers
       stopType: s.stopType, sequenceNo: i + 1, contactName: s.contactName.trim(), contactPhone: s.contactPhone.trim(), province: s.province.trim(),
       district: blankToNull(s.district), ward: blankToNull(s.ward), addressDetail: s.addressDetail.trim(),
       latitude: numOrNull(s.latitude), longitude: numOrNull(s.longitude), note: blankToNull(s.note),
+      services: Object.entries(s.services ?? {}).filter(([, value]) => !!value).map(([serviceCode, serviceValue]) => ({ serviceCode, serviceValue })),
     })),
     items: v.items.map(i => ({
       itemName: i.itemName.trim(), category: i.category, description: blankToNull(i.description), quantity: Number(i.quantity),
@@ -173,7 +177,8 @@ export function patchFromDetail(form: ShipmentForm, detail: ShipmentDetail, cata
   for (const s of detail.stops) {
     const g = stopForm(s.stopType);
     g.setValue({ stopType: s.stopType, contactName: s.contactName, contactPhone: s.contactPhone, province: s.province, district: s.district ?? '', ward: s.ward ?? '',
-      addressDetail: s.addressDetail, latitude: s.latitude, longitude: s.longitude, note: s.note ?? '' });
+      addressDetail: s.addressDetail, latitude: s.latitude, longitude: s.longitude, note: s.note ?? '',
+      services: Object.fromEntries((s.services ?? []).map(x => [x.serviceCode, x.serviceValue])) });
     form.controls.stops.push(g);
   }
   form.controls.items.clear();
@@ -203,6 +208,12 @@ export function applyServerErrors(form: ShipmentForm, errors: Record<string, str
   let step: number | null = null;
   const at = (s: number) => { step = step === null ? s : Math.min(step, s); };
   for (const [key, message] of Object.entries(errors)) {
+    // "stops[1].services[0].serviceValue" → the stop's services control
+    const stopService = /^stops\[(\d+)]\.services\[\d+]\.\w+$/.exec(key);
+    if (stopService) {
+      const control = form.controls.stops.at(+stopService[1])?.controls.services ?? null;
+      if (control) { control.setErrors({ server: message }); control.markAsTouched(); at(0); continue; }
+    }
     const match = /^(stops|items|services)\[(\d+)]\.(\w+)$/.exec(key);
     let control: AbstractControl | null = null;
     if (match) {
@@ -213,6 +224,7 @@ export function applyServerErrors(form: ShipmentForm, errors: Record<string, str
     } else if (key === 'pickupTime' || key === 'deliveryDeadline') { control = form.controls.schedule.get(key); at(0); }
     else if (key.startsWith('vehicle') || key === 'bodyTypeCode' || key.startsWith('minimum') || key.startsWith('minCargo')) { control = form.controls.vehicle.get(key); at(2); }
     else if (key === 'stops') at(0);
+    else if (key === 'services') at(3);
     else if (key === 'items') at(1);
     if (control) { control.setErrors({ ...(control.errors ?? {}), server: message }); control.markAsTouched(); }
     else unmatched.push(message);

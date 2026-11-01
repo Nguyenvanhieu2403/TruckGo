@@ -25,10 +25,12 @@ const GROUPS: { code: ServiceGroup; title: string }[] = [
                 <label class="checkbox"><input type="checkbox" [formControlName]="s.code" (change)="exclusive(s)" /> {{ s.name }}</label>
               }
               @case ('OPTION') {
-                <div class="field"><label [for]="s.code">{{ s.name }}</label>
-                  <select [id]="s.code" [formControlName]="s.code"><option [ngValue]="null">Không cần hỗ trợ</option>
+                <div class="field"><label [for]="s.code">{{ s.name }}@if (s.appliesTo === 'BOTH') { <span class="muted"> (cho cả đơn)</span> }</label>
+                  <select [id]="s.code" [formControlName]="s.code" [attr.disabled]="usedAtStops(s.code) ? true : null"><option [ngValue]="null">Không cần hỗ trợ</option>
                     @for (o of s.options; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
-                  </select></div>
+                  </select>
+                  @if (usedAtStops(s.code)) { <span class="muted small">Đã chọn riêng tại {{ usedAtStops(s.code) }} điểm ở bước Địa điểm; không chọn thêm cho cả đơn để tránh tính phí trùng.</span> }
+                  @else if (s.appliesTo === 'BOTH') { <span class="muted small">Tính một lần cho cả đơn. Có thể chọn riêng cho từng điểm ở bước Địa điểm.</span> }</div>
               }
               @case ('NUMBER') {
                 <div class="field" [class.invalid]="err(s.code)"><label [for]="s.code">{{ s.name }}@if (s.description) { <span class="muted"> ({{ s.description }})</span> }</label>
@@ -51,7 +53,7 @@ const GROUPS: { code: ServiceGroup; title: string }[] = [
     </section>
     <p class="hint muted">Dịch vụ bổ sung chưa được tính phí ở bước này; phụ phí (nếu có) sẽ hiển thị khi báo giá.</p>
   </div>`,
-  styles: [`.service-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 18px;align-items:start}.wide{grid-column:1/-1}`],
+  styles: [`.service-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 18px;align-items:start}.wide{grid-column:1/-1}.small{font-size:12px}`],
 })
 export class ServicesStepComponent {
   readonly form = input.required<ShipmentForm>();
@@ -62,6 +64,11 @@ export class ServicesStepComponent {
   exclusive(selected: ServiceDefinition): void {
     if (!selected.exclusiveGroup || !this.form().controls.services.get(selected.code)?.value) return;
     for (const s of this.catalog()) if (s.code !== selected.code && s.exclusiveGroup === selected.exclusiveGroup) this.form().controls.services.get(s.code)?.setValue(false);
+  }
+
+  /** How many stops order this service individually (then the order-wide choice is not allowed). */
+  usedAtStops(code: string): number {
+    return this.form().controls.stops.controls.filter(st => !!st.controls.services.value[code]).length;
   }
 
   err(code: string): string | null {

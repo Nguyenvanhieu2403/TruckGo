@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuotePanelComponent } from './quote-panel.component';
 import { fail, ok, quote } from './pricing-test-data';
 import { Quote } from '../../core/api/pricing.api';
@@ -13,6 +13,7 @@ describe('QuotePanelComponent', () => {
     TestBed.configureTestingModule({ imports: [QuotePanelComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
   });
+  afterEach(() => vi.useRealTimers());
 
   function render(current: Quote | null, owner = true) {
     const fixture = TestBed.createComponent(QuotePanelComponent);
@@ -108,5 +109,48 @@ describe('QuotePanelComponent', () => {
     const admin = render(quote(), false);
     expect(admin.button('Xác nhận báo giá')).toBeUndefined();
     expect(admin.button('Tính lại giá')).toBeUndefined();
+  });
+
+  it('separates order-level fees from per-stop fees and names the stops', () => {
+    const { el } = render(quote({ lines: [
+      { lineNo: 1, component: 'BASE', code: 'BASE', name: 'Giá mở cửa', description: null, quantity: 1, unitPrice: 100000, amount: 100000, appliesTo: 'ORDER', stopSequences: null },
+      { lineNo: 2, component: 'SERVICE', code: 'STOP_SERVICE:UNLOADING_SUPPORT:true', name: 'Hỗ trợ dỡ hàng', description: 'Tại điểm 2, 3', quantity: 2,
+        unitPrice: 90000, amount: 180000, appliesTo: 'STOP', stopSequences: [2, 3] }] }));
+    const stops = el.querySelector('[data-testid=stop-lines]')!;
+    expect(el.textContent).toContain('Phí theo đơn');
+    expect(el.textContent).toContain('Phí theo điểm dừng');
+    expect(stops.textContent).toContain('Hỗ trợ dỡ hàng');
+    expect(stops.textContent).toContain('Điểm 2, 3');
+    expect(stops.textContent).toContain('180.000 VNĐ');
+    expect(stops.textContent).not.toContain('Giá mở cửa');
+  });
+
+  it('re-reads the quote when it expires and then shows it as expired', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-01T23:59:00Z'));
+    const { el, fixture } = render(quote());
+    http.expectNone('/api/v1/shipments/sh-1/pricing');
+    vi.advanceTimersByTime(61_000);
+    http.expectOne('/api/v1/shipments/sh-1/pricing').flush(ok(quote({ status: 'EXPIRED', actions: { acceptable: false, rejectable: false, recalculable: true } })));
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid=quote-expired]')?.textContent).toContain('Báo giá đã hết hạn');
+  });
+
+  it('shows the rate-limit message and blocks re-pricing until Retry-After passes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-01T10:00:00Z'));
+    const { el, click, fixture } = render(quote());
+    click('Tính lại giá');
+    http.expectOne('/api/v1/shipments/sh-1/pricing/preview').flush(fail('Bạn đã tính giá đơn này 5 lần trong 10 phút; vui lòng thử lại sau'),
+      { status: 429, statusText: 'Too Many Requests', headers: { 'Retry-After': '3' } });
+    fixture.detectChanges();
+    expect(el.querySelector('[role=alert]')?.textContent).toContain('vui lòng thử lại sau');
+    const btn = [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Thử lại sau'))!;
+    expect(btn.textContent).toContain('Thử lại sau 3 giây');
+    expect(btn.disabled).toBe(true);
+    vi.advanceTimersByTime(3_000);
+    fixture.detectChanges();
+    expect(btn.textContent?.trim()).toBe('Tính lại giá');
+    expect(btn.disabled).toBe(false);
   });
 });

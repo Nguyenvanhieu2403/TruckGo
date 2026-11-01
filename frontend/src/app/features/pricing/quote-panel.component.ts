@@ -1,4 +1,5 @@
-import { Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
@@ -49,21 +50,31 @@ type Confirm = 'accept' | 'reject' | null;
             </tbody>
             <tfoot><tr><th>Tổng giá</th><th class="num total">{{ vnd(q.totalPrice) }}</th></tr></tfoot>
           </table>
-          <details class="lines"><summary>Chi tiết từng khoản ({{ q.lines.length }})</summary>
+          <details class="lines" [open]="stopLines().length > 0"><summary>Chi tiết từng khoản ({{ q.lines.length }})</summary>
+            <h3 class="group">Phí theo đơn</h3>
             <ul class="line-list">
-              @for (l of q.lines; track l.lineNo) {
+              @for (l of orderLines(); track l.lineNo) {
                 <li><div class="line-main"><span>{{ l.name }}</span><span class="num">{{ vnd(l.amount) }}</span></div>
                   <div class="line-sub muted">@if (l.description) { {{ l.description }} · }{{ l.quantity | number: '1.0-3' }} × {{ vnd(l.unitPrice) }}</div></li>
               }
             </ul>
+            @if (stopLines().length) {
+              <h3 class="group">Phí theo điểm dừng</h3>
+              <ul class="line-list" data-testid="stop-lines">
+                @for (l of stopLines(); track l.lineNo) {
+                  <li><div class="line-main"><span>{{ l.name }} <span class="badge stops">Điểm {{ l.stopSequences?.join(', ') }}</span></span><span class="num">{{ vnd(l.amount) }}</span></div>
+                    <div class="line-sub muted">{{ l.quantity | number: '1.0-0' }} điểm × {{ vnd(l.unitPrice) }}</div></li>
+                }
+              </ul>
+            }
           </details>
           @if (q.adjustmentReason) { <p class="small muted">Điều chỉnh của quản trị viên: {{ q.adjustmentReason }}</p> }
         }
         @switch (q.status) {
-          @case ('CALCULATED') { <p class="small">Báo giá có hiệu lực đến <strong>{{ q.expiresAt | date: 'HH:mm dd/MM/yyyy' }}</strong>.</p> }
+          @case ('CALCULATED') { <p class="small">Báo giá có hiệu lực đến <strong>{{ q.expiresAt | date: 'HH:mm dd/MM/yyyy' }}</strong>; sau thời điểm này báo giá tự hết hạn.</p> }
           @case ('ACCEPTED') { <div class="alert alert-success">Bạn đã xác nhận báo giá lúc {{ q.acceptedAt | date: 'HH:mm dd/MM/yyyy' }}.</div> }
           @case ('REJECTED') { <div class="alert alert-info">Bạn đã từ chối báo giá@if (q.rejectionReason) {: {{ q.rejectionReason }}}. Có thể yêu cầu tính lại giá.</div> }
-          @case ('EXPIRED') { <div class="alert alert-info">Báo giá đã hết hạn. Vui lòng tính lại giá.</div> }
+          @case ('EXPIRED') { <div class="alert alert-warn" data-testid="quote-expired">Báo giá đã hết hạn lúc {{ q.expiresAt | date: 'HH:mm dd/MM/yyyy' }} và không còn dùng để xác nhận được. Vui lòng tính lại giá.</div> }
           @case ('SUPERSEDED') { <div class="alert alert-info">Đơn đã thay đổi nên báo giá này không còn hiệu lực. Vui lòng tính lại giá.</div> }
         }
       } @else {
@@ -90,8 +101,8 @@ type Confirm = 'accept' | 'reject' | null;
             <button class="btn btn-ghost" type="button" (click)="confirming.set('reject')">Từ chối báo giá</button>
           }
           @if (canRequest()) {
-            <button class="btn" [class.btn-primary]="!quote()" [class.btn-ghost]="!!quote()" type="button" (click)="requestQuote()" [disabled]="busy()">
-              {{ busy() ? 'Đang tính giá…' : quote() ? 'Tính lại giá' : 'Tính giá' }}</button>
+            <button class="btn" [class.btn-primary]="!quote()" [class.btn-ghost]="!!quote()" type="button" (click)="requestQuote()" [disabled]="busy() || retryIn() > 0">
+              {{ busy() ? 'Đang tính giá…' : retryIn() > 0 ? 'Thử lại sau ' + retryIn() + ' giây' : quote() ? 'Tính lại giá' : 'Tính giá' }}</button>
           }
         </div>
       }
@@ -111,7 +122,7 @@ type Confirm = 'accept' | 'reject' | null;
   .breakdown{width:100%;border-collapse:collapse;margin:8px 0 6px;font-size:14px}.breakdown td,.breakdown th{padding:7px 0;border-bottom:1px solid #eef1ea;text-align:left}
   .breakdown tfoot th{border-top:2px solid var(--tg-ink);border-bottom:0;font-size:15px}.num{text-align:right!important;white-space:nowrap}.total{font-size:18px}
   .lines,.history{margin:10px 0;font-size:13px}.line-list{list-style:none;padding:0;margin:8px 0 0}.line-list li{padding:7px 0;border-bottom:1px solid #eef1ea}
-  .line-main{display:flex;justify-content:space-between;gap:12px}.line-sub{font-size:12px;margin-top:2px}.lines summary,.history summary{cursor:pointer;color:var(--tg-muted)}
+  .line-main{display:flex;justify-content:space-between;gap:12px}.group{font-size:13px;margin:10px 0 0;color:var(--tg-ink)}.stops{font-size:11px;margin-left:4px}.line-sub{font-size:12px;margin-top:2px}.lines summary,.history summary{cursor:pointer;color:var(--tg-muted)}
   .history-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;padding:6px 0;border-bottom:1px solid #eef1ea}
   @media(max-width:560px){.history-row{grid-template-columns:1fr 1fr}}`],
 })
@@ -133,6 +144,13 @@ export class QuotePanelComponent implements OnInit {
   protected readonly confirming = signal<Confirm>(null);
   protected rejectReason = '';
   protected readonly vnd = formatVnd;
+  /** Seconds until the server accepts another re-pricing (from Retry-After); 0 = allowed. */
+  protected readonly retryIn = signal(0);
+  protected readonly orderLines = computed(() => (this.quote()?.lines ?? []).filter(l => (l.appliesTo ?? 'ORDER') === 'ORDER'));
+  protected readonly stopLines = computed(() => (this.quote()?.lines ?? []).filter(l => l.appliesTo === 'STOP'));
+  private readonly destroyRef = inject(DestroyRef);
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryTimer: ReturnType<typeof setInterval> | null = null;
   protected readonly rows = computed(() => {
     const b = this.quote()?.breakdown;
     return b ? BREAKDOWN_KEYS.filter(k => k.component === 'BASE' || k.component === 'DISTANCE' || b[k.key] !== 0)
@@ -143,7 +161,10 @@ export class QuotePanelComponent implements OnInit {
     return this.owner() && this.shipmentOpen() && (!q || q.actions.recalculable);
   });
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void {
+    this.load();
+    this.destroyRef.onDestroy(() => { this.clearExpiryTimer(); if (this.retryTimer) clearInterval(this.retryTimer); });
+  }
 
   statusLabel(status: Quote['status']): string { return QUOTE_STATUS_LABELS[status]; }
 
@@ -151,7 +172,7 @@ export class QuotePanelComponent implements OnInit {
     this.loading.set(true);
     this.loadError.set(null);
     this.api.current(this.shipmentId()).subscribe({
-      next: q => { this.quote.set(q); this.loading.set(false); },
+      next: q => { this.show(q); this.loading.set(false); },
       error: (e: unknown) => { this.loadError.set(toApiError(e).message); this.loading.set(false); },
     });
   }
@@ -161,7 +182,10 @@ export class QuotePanelComponent implements OnInit {
   }
 
   requestQuote(): void {
-    this.run(this.api.preview(this.shipmentId()), q => q.status === 'CALCULATED' ? 'Đã tính giá cho đơn hàng.' : 'Đơn cần quản trị viên xác nhận trước khi báo giá.');
+    const before = this.quote()?.quoteCode;
+    this.run(this.api.preview(this.shipmentId()), q => q.quoteCode === before && q.status === 'CALCULATED'
+      ? 'Đơn chưa thay đổi; báo giá hiện tại vẫn còn hiệu lực.'
+      : q.status === 'CALCULATED' ? 'Đã tính giá cho đơn hàng.' : 'Đơn cần quản trị viên xác nhận trước khi báo giá.');
   }
 
   accept(): void { this.run(this.api.accept(this.shipmentId()), () => 'Đã xác nhận báo giá.'); }
@@ -174,7 +198,7 @@ export class QuotePanelComponent implements OnInit {
     this.error.set(null);
     request.subscribe({
       next: q => {
-        this.quote.set(q);
+        this.show(q);
         this.history.set([]);
         this.confirming.set(null);
         this.rejectReason = '';
@@ -184,6 +208,7 @@ export class QuotePanelComponent implements OnInit {
       },
       error: (e: unknown) => {
         const err = toApiError(e);
+        if (err.status === 429) this.startRetryCountdown(Number((e as HttpErrorResponse).headers?.get('Retry-After')) || 60);
         const detail = Object.values(err.fieldErrors).join(' ');
         this.error.set(detail ? `${err.message}: ${detail}` : err.message);
         this.toast.error(err.message);
@@ -192,5 +217,27 @@ export class QuotePanelComponent implements OnInit {
         if (err.status === 409) this.load(); // state changed elsewhere (expired, superseded…)
       },
     });
+  }
+
+  /** Shows a quote and, while it is a live calculated quote, re-reads it when it expires (the server marks it EXPIRED). */
+  private show(q: Quote | null): void {
+    this.quote.set(q);
+    this.clearExpiryTimer();
+    if (q?.status === 'CALCULATED' && q.expiresAt) {
+      const ms = new Date(q.expiresAt).getTime() - Date.now();
+      if (ms <= 0) { this.load(); return; }
+      if (ms < 2_147_000_000) this.expiryTimer = setTimeout(() => this.load(), ms + 1000);
+    }
+  }
+
+  private clearExpiryTimer(): void { if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; } }
+
+  private startRetryCountdown(seconds: number): void {
+    if (this.retryTimer) clearInterval(this.retryTimer);
+    this.retryIn.set(Math.ceil(seconds));
+    this.retryTimer = setInterval(() => {
+      this.retryIn.update(v => Math.max(v - 1, 0));
+      if (this.retryIn() === 0 && this.retryTimer) { clearInterval(this.retryTimer); this.retryTimer = null; }
+    }, 1000);
   }
 }

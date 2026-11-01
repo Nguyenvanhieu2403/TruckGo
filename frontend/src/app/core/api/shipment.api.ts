@@ -10,6 +10,8 @@ export type StopType = 'PICKUP' | 'DELIVERY';
 export interface StopPayload {
   stopType: StopType; sequenceNo: number; contactName: string; contactPhone: string; province: string; district: string | null; ward: string | null;
   addressDetail: string; latitude: number | null; longitude: number | null; note: string | null;
+  /** Services ordered at this stop only (e.g. unloading at this delivery). */
+  services?: { serviceCode: string; serviceValue: string }[];
 }
 export interface ItemPayload {
   itemName: string; category: string; description: string | null; quantity: number; weightPerUnitKg: number;
@@ -23,7 +25,9 @@ export interface DraftPayload {
   customerNote: string | null; stops: StopPayload[]; items: ItemPayload[]; services: ServicePayload[]; version?: number;
 }
 
-export interface Stop extends StopPayload { id: string; fullAddress: string; }
+export interface Stop extends Omit<StopPayload, 'services'> {
+  id: string; fullAddress: string; services?: { serviceCode: string; serviceName: string; serviceValue: string }[];
+}
 export interface Item extends ItemPayload { id: string; categoryName: string; totalWeightKg: number; totalVolumeM3: number | null; }
 export interface SelectedService { serviceCode: string; serviceName: string; group: ServiceGroup | null; valueType: ServiceValueType | null; serviceValue: string; valueLabel: string | null; }
 export interface Attachment { id: string; fileName: string; contentType: string; fileSize: number; fileType: string; createdAt: string; contentUrl: string; }
