@@ -51,6 +51,12 @@ public class ShipmentDraftAssembler {
         List<ShipmentStop> stops = stops(request.stops(), errors);
         List<ShipmentItem> items = items(request.items(), errors);
         List<ShipmentExtraService> services = services(request.services() == null ? List.of() : request.services(), errors);
+        Set<String> orderWide = new HashSet<>();
+        services.forEach(x -> orderWide.add(x.getServiceCode()));
+        for (ShipmentStop stop : stops)
+            for (ShipmentStopService x : stop.getServices())
+                if (orderWide.contains(x.getServiceCode()))
+                    errors.put("services", x.getServiceName() + " đã được chọn cho cả đơn; hãy chọn theo đơn hoặc theo từng điểm, không chọn cả hai");
         Instant pickup = toInstant(request.pickupTime());
         Instant deadline = toInstant(request.deliveryDeadline());
         Instant now = clock.instant();
@@ -120,8 +126,10 @@ public class ShipmentDraftAssembler {
             // Blank coordinates are filled later, in the background, by StopCoordinateFiller (never while saving).
             BigDecimal lat = s.latitude();
             BigDecimal lng = s.longitude();
-            stops.add(new ShipmentStop(s.stopType(), position + 1, s.contactName().trim(), phone, s.province().trim(), blankToNull(s.district()),
-                    blankToNull(s.ward()), s.addressDetail().trim(), full, lat, lng, blankToNull(s.note())));
+            ShipmentStop stop = new ShipmentStop(s.stopType(), position + 1, s.contactName().trim(), phone, s.province().trim(), blankToNull(s.district()),
+                    blankToNull(s.ward()), s.addressDetail().trim(), full, lat, lng, blankToNull(s.note()));
+            stopServices(stop, s.services(), prefix, errors);
+            stops.add(stop);
         }
         return stops;
     }
@@ -154,32 +162,9 @@ public class ShipmentDraftAssembler {
             if (found.isEmpty()) { errors.put("services[" + i + "].serviceCode", "Dịch vụ không hợp lệ"); continue; }
             ServiceDefinitionDto def = found.get();
             if (!seen.add(code)) { errors.put("services[" + i + "].serviceCode", "Dịch vụ bị chọn trùng"); continue; }
-            String value = r.serviceValue() == null ? null : r.serviceValue().trim();
-            String stored;
-            switch (def.valueType()) {
-                case BOOLEAN -> {
-                    if ("false".equalsIgnoreCase(value)) continue; // explicitly not selected
-                    if (value != null && !value.isEmpty() && !"true".equalsIgnoreCase(value)) { errors.put(key, "Giá trị phải là true/false"); continue; }
-                    stored = "true";
-                }
-                case OPTION -> {
-                    if (def.options().stream().map(ServiceOptionDto::value).noneMatch(v -> v.equals(value))) { errors.put(key, "Lựa chọn không hợp lệ cho " + def.name()); continue; }
-                    stored = value;
-                }
-                case NUMBER -> {
-                    Integer n = parseInt(value);
-                    if (n == null || (def.minValue() != null && n < def.minValue()) || (def.maxValue() != null && n > def.maxValue())) {
-                        errors.put(key, def.name() + ": nhập số nguyên từ " + def.minValue() + " đến " + def.maxValue());
-                        continue;
-                    }
-                    stored = n.toString();
-                }
-                case TEXT -> {
-                    if (value == null || value.isEmpty()) { errors.put(key, "Vui lòng nhập nội dung cho " + def.name()); continue; }
-                    stored = value;
-                }
-                default -> throw new IllegalStateException();
-            }
+            if (!def.orderLevel()) { errors.put("services[" + i + "].serviceCode", def.name() + " chỉ chọn được cho từng điểm dừng"); continue; }
+            String stored = normalizeValue(def, r.serviceValue(), key, errors);
+            if (stored == null) continue;
             if (def.exclusiveGroup() != null) {
                 String other = exclusive.putIfAbsent(def.exclusiveGroup(), def.name());
                 if (other != null) { errors.put("services[" + i + "].serviceCode", def.name() + " không thể chọn cùng " + other); continue; }
@@ -187,6 +172,56 @@ public class ShipmentDraftAssembler {
             result.add(new ShipmentExtraService(def.code(), def.name(), stored, def.description()));
         }
         return result;
+    }
+
+    /** The value to store for a selected service, or null when it is not selected or invalid (error recorded). */
+    private static String normalizeValue(ServiceDefinitionDto def, String raw, String key, Map<String, String> errors) {
+        String value = raw == null ? null : raw.trim();
+        switch (def.valueType()) {
+            case BOOLEAN -> {
+                if ("false".equalsIgnoreCase(value)) return null; // explicitly not selected
+                if (value != null && !value.isEmpty() && !"true".equalsIgnoreCase(value)) { errors.put(key, "Giá trị phải là true/false"); return null; }
+                return "true";
+            }
+            case OPTION -> {
+                if (def.options().stream().map(ServiceOptionDto::value).noneMatch(v -> v.equals(value))) { errors.put(key, "Lựa chọn không hợp lệ cho " + def.name()); return null; }
+                return value;
+            }
+            case NUMBER -> {
+                Integer n = parseInt(value);
+                if (n == null || (def.minValue() != null && n < def.minValue()) || (def.maxValue() != null && n > def.maxValue())) {
+                    errors.put(key, def.name() + ": nhập số nguyên từ " + def.minValue() + " đến " + def.maxValue());
+                    return null;
+                }
+                return n.toString();
+            }
+            case TEXT -> {
+                if (value == null || value.isEmpty()) { errors.put(key, "Vui lòng nhập nội dung cho " + def.name()); return null; }
+                return value;
+            }
+            default -> throw new IllegalStateException();
+        }
+    }
+
+    /** Services ordered at one stop: allowed for that kind of stop, valid value, at most once per stop. */
+    private void stopServices(ShipmentStop stop, List<ServiceRequest> requests, String prefix, Map<String, String> errors) {
+        if (requests == null) return;
+        Set<String> seen = new HashSet<>();
+        for (int j = 0; j < requests.size(); j++) {
+            ServiceRequest r = requests.get(j);
+            String key = prefix + "services[" + j + "]";
+            String code = code(r.serviceCode());
+            Optional<ServiceDefinitionDto> found = catalogs.shipmentService(code);
+            if (found.isEmpty()) { errors.put(key + ".serviceCode", "Dịch vụ không hợp lệ"); continue; }
+            ServiceDefinitionDto def = found.get();
+            if (!def.allowedAt(stop.getStopType())) {
+                errors.put(key + ".serviceCode", def.name() + " không áp dụng cho " + (stop.getStopType() == StopType.PICKUP ? "điểm lấy hàng" : "điểm giao hàng"));
+                continue;
+            }
+            if (!seen.add(code)) { errors.put(key + ".serviceCode", "Dịch vụ bị chọn trùng tại điểm này"); continue; }
+            String stored = normalizeValue(def, r.serviceValue(), key + ".serviceValue", errors);
+            if (stored != null) stop.addService(new ShipmentStopService(def.code(), def.name(), stored));
+        }
     }
 
     private static Instant toInstant(OffsetDateTime value) { return value == null ? null : value.toInstant(); }

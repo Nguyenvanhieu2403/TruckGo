@@ -26,7 +26,9 @@ public final class QuoteDtos {
             @Digits(integer = 10, fraction = 0, message = "Số tiền là số nguyên VNĐ") BigDecimal adjustmentAmount,
             @NotBlank(message = "Nhập lý do điều chỉnh") @Size(min = 5, max = 500, message = "Lý do dài 5–500 ký tự") String reason) { }
 
-    public record LineResponse(int lineNo, PriceComponent component, String code, String name, String description, BigDecimal quantity, BigDecimal unitPrice, BigDecimal amount) { }
+    /** appliesTo ORDER (whole order) or STOP (services at particular stops, listed in stopSequences). */
+    public record LineResponse(int lineNo, PriceComponent component, String code, String name, String description, BigDecimal quantity, BigDecimal unitPrice, BigDecimal amount,
+                               String appliesTo, List<Integer> stopSequences) { }
 
     public record Breakdown(BigDecimal basePrice, BigDecimal distancePrice, BigDecimal weightSurcharge, BigDecimal volumeSurcharge, BigDecimal serviceSurcharge,
                             BigDecimal additionalStopSurcharge, BigDecimal timeSurcharge, BigDecimal otherSurcharge) { }

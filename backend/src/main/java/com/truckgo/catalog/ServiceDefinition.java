@@ -29,6 +29,9 @@ public class ServiceDefinition implements CatalogEntry {
     @Column(name = "sort_order", nullable = false) private int sortOrder;
     @Column(nullable = false) private boolean active;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    /** ORDER (whole order), STOP (individual stops) or BOTH; stopTypes says which stops: PICKUP, DELIVERY or ANY. */
+    @Column(name = "applies_to", nullable = false) private String appliesTo;
+    @Column(name = "stop_types") private String stopTypes;
     @OneToMany(fetch = FetchType.EAGER) @JoinColumn(name = "service_code", referencedColumnName = "code", insertable = false, updatable = false)
     @OrderBy("sortOrder") private List<ServiceOption> options = new ArrayList<>();
 
@@ -44,6 +47,8 @@ public class ServiceDefinition implements CatalogEntry {
     public Integer getMaxValue() { return maxValue; }
     public int getSortOrder() { return sortOrder; }
     public List<ServiceOption> getOptions() { return options; }
+    public String getAppliesTo() { return appliesTo; }
+    public String getStopTypes() { return stopTypes; }
     @Override public boolean isActive() { return active; }
     @Override public void setActive(boolean active) { this.active = active; this.updatedAt = Instant.now(); }
 }

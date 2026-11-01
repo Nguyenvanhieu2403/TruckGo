@@ -6,8 +6,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Pure pricing function (no I/O). Formula:
@@ -53,6 +56,10 @@ public final class PricingCalculator {
             lines.add(line(PriceComponent.VOLUME, "VOLUME", "Phụ phí thể tích", "Vượt " + plain(r.includedVolumeM3().multiply(vehicles)) + " m³", extraM3, r.pricePerExtraM3()));
 
         for (PricingInput.SelectedService s : in.services()) lines.add(service(r, in, s, transport));
+        // Per-stop services: one line per service and option, quantity = number of stops it was ordered at.
+        Map<String, List<PricingInput.StopService>> byService = new LinkedHashMap<>();
+        for (PricingInput.StopService s : in.stopServices()) byService.computeIfAbsent(s.code() + "\u0000" + s.value(), k -> new ArrayList<>()).add(s);
+        for (List<PricingInput.StopService> group : byService.values()) lines.add(stopService(r, group, transport));
 
         int extraStops = Math.max(0, in.stopCount() - 2);
         if (extraStops > 0 && r.additionalStopPrice().signum() > 0)
@@ -98,6 +105,34 @@ public final class PricingCalculator {
             case PER_STOP -> line(PriceComponent.SERVICE, code, s.name(), "Theo số điểm dừng", BigDecimal.valueOf(in.stopCount()), f.amount());
             case FREE -> throw new IllegalStateException();
         };
+    }
+
+    /**
+     * The fee of one occurrence (the order-level rule applied to a single stop) times the number of stops. FIXED and
+     * PER_STOP are an amount per stop, PERCENTAGE a share of the transport price per stop, PER_UNIT the amount per
+     * declared unit (1 when the service has no number) per stop.
+     */
+    private static QuoteLine stopService(PricingRates r, List<PricingInput.StopService> group, BigDecimal transport) {
+        PricingInput.StopService first = group.getFirst();
+        List<Integer> sequences = group.stream().map(PricingInput.StopService::sequenceNo).sorted().toList();
+        BigDecimal count = BigDecimal.valueOf(sequences.size());
+        String where = "Tại điểm " + sequences.stream().map(String::valueOf).collect(Collectors.joining(", "));
+        String code = "STOP_SERVICE:" + first.code() + (first.value() == null ? "" : ":" + first.value());
+        Optional<PricingRates.ServiceFee> fee = r.serviceFees().stream().filter(f -> f.serviceCode().equals(first.code()) && first.value() != null && first.value().equals(f.optionValue())).findFirst()
+                .or(() -> r.serviceFees().stream().filter(f -> f.serviceCode().equals(first.code()) && f.optionValue() == null).findFirst());
+        BigDecimal unit;
+        if (fee.isEmpty() || fee.get().type() == FeeType.FREE) {
+            return new QuoteLine(PriceComponent.SERVICE, code, first.name(), where + " · Miễn phí", count, BigDecimal.ZERO, BigDecimal.ZERO, "STOP", sequences);
+        }
+        PricingRates.ServiceFee f = fee.get();
+        unit = switch (f.type()) {
+            case FIXED, PER_STOP -> f.amount();
+            case PERCENTAGE -> round(transport.multiply(f.percentage()).divide(HUNDRED, 6, RoundingMode.HALF_UP));
+            case PER_UNIT -> f.amount().multiply(first.numeric() && first.value() != null ? new BigDecimal(first.value()) : BigDecimal.ONE);
+            case FREE -> BigDecimal.ZERO;
+        };
+        String detail = f.type() == FeeType.PERCENTAGE ? where + " · " + plain(f.percentage()) + "% cước vận chuyển mỗi điểm" : where;
+        return new QuoteLine(PriceComponent.SERVICE, code, first.name(), detail, count, round(unit), round(count.multiply(round(unit))), "STOP", sequences);
     }
 
     private static QuoteLine fee(PriceComponent component, String code, String name, FeeType type, BigDecimal amount, BigDecimal percentage, BigDecimal transport) {

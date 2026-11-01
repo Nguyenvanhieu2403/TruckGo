@@ -31,6 +31,9 @@ public class ShipmentQuoteItem {
     @Column(nullable = false) private BigDecimal quantity;
     @Column(name = "unit_price", nullable = false) private BigDecimal unitPrice;
     @Column(nullable = false) private BigDecimal amount;
+    /** ORDER or STOP; stop sequence numbers ("1,3") for per-stop services, as priced. */
+    @Column(name = "applies_to", nullable = false) private String appliesTo = "ORDER";
+    @Column(name = "stop_sequences") private String stopSequences;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
 
     protected ShipmentQuoteItem() { }
@@ -46,6 +49,8 @@ public class ShipmentQuoteItem {
         this.quantity = line.quantity().setScale(3, java.math.RoundingMode.HALF_UP);
         this.unitPrice = line.unitPrice().setScale(2, java.math.RoundingMode.HALF_UP);
         this.amount = line.amount();
+        this.appliesTo = line.appliesTo() == null ? "ORDER" : line.appliesTo();
+        this.stopSequences = line.stopSequences() == null ? null : line.stopSequences().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
         this.createdAt = createdAt;
     }
 
@@ -57,4 +62,8 @@ public class ShipmentQuoteItem {
     public BigDecimal getQuantity() { return quantity; }
     public BigDecimal getUnitPrice() { return unitPrice; }
     public BigDecimal getAmount() { return amount; }
+    public String getAppliesTo() { return appliesTo; }
+    public java.util.List<Integer> getStopSequences() {
+        return stopSequences == null ? java.util.List.of() : java.util.Arrays.stream(stopSequences.split(",")).map(Integer::valueOf).toList();
+    }
 }

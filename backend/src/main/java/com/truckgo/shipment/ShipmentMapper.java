@@ -13,6 +13,7 @@ import com.truckgo.shipment.dto.ShipmentResponses.ShipmentDetail;
 import com.truckgo.shipment.dto.ShipmentResponses.ShipmentSummary;
 import com.truckgo.shipment.dto.ShipmentResponses.StatusHistoryResponse;
 import com.truckgo.shipment.dto.ShipmentResponses.StopResponse;
+import com.truckgo.shipment.dto.ShipmentResponses.StopServiceResponse;
 import com.truckgo.shipment.dto.ShipmentResponses.VehicleRequirement;
 import com.truckgo.shipment.dto.ShipmentResponses.Warning;
 import org.springframework.beans.factory.ObjectProvider;
@@ -139,7 +140,8 @@ public class ShipmentMapper {
 
     private static StopResponse stop(ShipmentStop x) {
         return new StopResponse(x.getId(), x.getStopType(), x.getSequenceNo(), x.getContactName(), x.getContactPhone(), x.getProvince(), x.getDistrict(),
-                x.getWard(), x.getAddressDetail(), x.getFullAddress(), x.getLatitude(), x.getLongitude(), x.getNote());
+                x.getWard(), x.getAddressDetail(), x.getFullAddress(), x.getLatitude(), x.getLongitude(), x.getNote(),
+                x.getServices().stream().map(v -> new StopServiceResponse(v.getServiceCode(), v.getServiceName(), v.getServiceValue())).toList());
     }
 
     private ItemResponse item(ShipmentItem i) {

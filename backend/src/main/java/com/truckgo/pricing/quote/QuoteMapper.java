@@ -36,7 +36,7 @@ public class QuoteMapper {
                 s == null ? null : s.getTotalWeightKg(), s == null ? null : s.getTotalVolumeM3(), s == null ? 0 : s.getStops().size(),
                 breakdown, q.getTotalPrice(), q.getCurrency(),
                 q.getItems().stream().map(i -> new LineResponse(i.getLineNo(), i.getComponent(), i.getItemCode(), i.getItemName(), i.getDescription(),
-                        i.getQuantity(), i.getUnitPrice(), i.getAmount())).toList(),
+                        i.getQuantity(), i.getUnitPrice(), i.getAmount(), i.getAppliesTo(), i.getStopSequences())).toList(),
                 q.getReviewReasonCode(), q.getReviewReason(), q.getRejectionReason(), q.getAdjustmentReason(),
                 q.getExpiresAt(), q.getAcceptedAt(), q.getRejectedAt(), q.getSupersededAt(), q.getCreatedAt(),
                 new QuoteActions(viewerIsOwner && live && shipmentOpen, viewerIsOwner && live,

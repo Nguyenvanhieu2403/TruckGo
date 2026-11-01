@@ -5,6 +5,7 @@ import com.truckgo.catalog.ItemCategory;
 import com.truckgo.catalog.ServiceDefinition;
 import com.truckgo.catalog.ServiceValueType;
 import com.truckgo.catalog.VehicleBodyType;
+import com.truckgo.shipment.StopType;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -29,11 +30,26 @@ public final class CatalogDtos {
 
     public record ServiceOptionDto(String value, String label) { }
 
+    /** appliesTo: ORDER, STOP or BOTH; stopTypes: PICKUP, DELIVERY or ANY (null for order-only services). */
     public record ServiceDefinitionDto(String code, String name, String group, ServiceValueType valueType, String description,
-                                       String exclusiveGroup, Integer minValue, Integer maxValue, List<ServiceOptionDto> options) {
+                                       String exclusiveGroup, Integer minValue, Integer maxValue, List<ServiceOptionDto> options,
+                                       String appliesTo, String stopTypes) {
+        public ServiceDefinitionDto(String code, String name, String group, ServiceValueType valueType, String description,
+                                    String exclusiveGroup, Integer minValue, Integer maxValue, List<ServiceOptionDto> options) {
+            this(code, name, group, valueType, description, exclusiveGroup, minValue, maxValue, options, "ORDER", null);
+        }
+
         public static ServiceDefinitionDto from(ServiceDefinition s) {
             return new ServiceDefinitionDto(s.getCode(), s.getName(), s.getGroupCode(), s.getValueType(), s.getDescription(), s.getExclusiveGroup(),
-                    s.getMinValue(), s.getMaxValue(), s.getOptions().stream().map(o -> new ServiceOptionDto(o.getValue(), o.getLabel())).toList());
+                    s.getMinValue(), s.getMaxValue(), s.getOptions().stream().map(o -> new ServiceOptionDto(o.getValue(), o.getLabel())).toList(),
+                    s.getAppliesTo(), s.getStopTypes());
+        }
+
+        public boolean orderLevel() { return !"STOP".equals(appliesTo); }
+
+        public boolean allowedAt(StopType stop) {
+            return ("STOP".equals(appliesTo) || "BOTH".equals(appliesTo))
+                    && ("ANY".equals(stopTypes) || (stopTypes != null && stopTypes.equals(stop.name())));
         }
     }
 }

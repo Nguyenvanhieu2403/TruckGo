@@ -51,7 +51,13 @@ public final class ShipmentRequests {
             @NotBlank(message = "Nhập địa chỉ chi tiết") @Size(max = 255, message = "Địa chỉ tối đa 255 ký tự") String addressDetail,
             @DecimalMin(value = "-90", message = "Vĩ độ từ -90 đến 90") @DecimalMax(value = "90", message = "Vĩ độ từ -90 đến 90") @Digits(integer = 3, fraction = 6) BigDecimal latitude,
             @DecimalMin(value = "-180", message = "Kinh độ từ -180 đến 180") @DecimalMax(value = "180", message = "Kinh độ từ -180 đến 180") @Digits(integer = 3, fraction = 6) BigDecimal longitude,
-            @Size(max = 500, message = "Ghi chú tối đa 500 ký tự") String note) { }
+            @Size(max = 500, message = "Ghi chú tối đa 500 ký tự") String note,
+            @Valid @Size(max = 10, message = "Tối đa 10 dịch vụ mỗi điểm") List<ServiceRequest> services) {
+        public StopRequest(StopType stopType, Integer sequenceNo, String contactName, String contactPhone, String province, String district, String ward,
+                           String addressDetail, BigDecimal latitude, BigDecimal longitude, String note) {
+            this(stopType, sequenceNo, contactName, contactPhone, province, district, ward, addressDetail, latitude, longitude, note, null);
+        }
+    }
 
     public record ItemRequest(
             @NotBlank(message = "Nhập tên hàng") @Size(max = 150, message = "Tên hàng tối đa 150 ký tự") String itemName,

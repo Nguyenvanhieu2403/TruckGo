@@ -21,8 +21,11 @@ public final class ShipmentResponses {
 
     public record Actions(boolean editable, boolean publishable, boolean cancellable, boolean deletable, boolean attachmentsEditable) { }
 
+    public record StopServiceResponse(String serviceCode, String serviceName, String serviceValue) { }
+
     public record StopResponse(UUID id, StopType stopType, int sequenceNo, String contactName, String contactPhone, String province, String district,
-                               String ward, String addressDetail, String fullAddress, BigDecimal latitude, BigDecimal longitude, String note) { }
+                               String ward, String addressDetail, String fullAddress, BigDecimal latitude, BigDecimal longitude, String note,
+                               List<StopServiceResponse> services) { }
 
     public record ItemResponse(UUID id, String itemName, String category, String categoryName, String description, int quantity,
                                BigDecimal weightPerUnitKg, BigDecimal lengthCm, BigDecimal widthCm, BigDecimal heightCm,

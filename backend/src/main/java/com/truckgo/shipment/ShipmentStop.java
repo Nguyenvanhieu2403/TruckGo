@@ -1,5 +1,6 @@
 package com.truckgo.shipment;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -8,10 +9,15 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import org.hibernate.annotations.BatchSize;
 import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /** Pickup or delivery point. Any number of stops per order is supported; ordering is by sequenceNo. */
@@ -33,6 +39,9 @@ public class ShipmentStop {
     private BigDecimal longitude;
     private String note;
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
+    /** Services ordered at this stop only (Sprint 4 completion); order-wide services live on the shipment. */
+    @OneToMany(mappedBy = "stop", cascade = CascadeType.ALL, orphanRemoval = true) @OrderBy("serviceCode") @BatchSize(size = 50)
+    private List<ShipmentStopService> services = new ArrayList<>();
 
     protected ShipmentStop() { }
 
@@ -55,6 +64,12 @@ public class ShipmentStop {
     }
 
     void attachTo(Shipment shipment) { this.shipment = shipment; }
+
+    public void addService(ShipmentStopService service) { service.attachTo(this); services.add(service); }
+
+    UUID shipmentId() { return shipment.getId(); }
+
+    public List<ShipmentStopService> getServices() { return services; }
 
     public UUID getId() { return id; }
     public StopType getStopType() { return stopType; }
