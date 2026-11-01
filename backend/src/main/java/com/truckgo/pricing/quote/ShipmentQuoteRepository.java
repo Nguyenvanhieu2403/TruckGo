@@ -22,4 +22,9 @@ public interface ShipmentQuoteRepository extends JpaRepository<ShipmentQuote, UU
     int maxVersion(@Param("shipmentId") UUID shipmentId);
 
     Page<ShipmentQuote> findByStatus(QuoteStatus status, Pageable pageable);
+
+    /** Versions a customer created for one order since a moment (rate limiting; the database is the source of truth). */
+    List<ShipmentQuote> findByShipmentIdAndCreatedByAndCreatedAtAfterOrderByCreatedAtAsc(UUID shipmentId, UUID createdBy, java.time.Instant after);
+
+    List<ShipmentQuote> findByCreatedByAndCreatedAtAfterOrderByCreatedAtAsc(UUID createdBy, java.time.Instant after);
 }

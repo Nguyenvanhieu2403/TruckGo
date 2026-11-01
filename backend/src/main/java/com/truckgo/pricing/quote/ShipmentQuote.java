@@ -59,6 +59,8 @@ public class ShipmentQuote {
     @Column(name = "adjustment_reason", updatable = false) private String adjustmentReason;
     @Column(name = "adjusted_by", updatable = false) private UUID adjustedBy;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "pricing_snapshot", updatable = false) private String pricingSnapshot;
+    /** Hash of everything the price depends on; equal fingerprints mean re-pricing would give the same quote. */
+    @Column(name = "input_fingerprint", updatable = false) private String inputFingerprint;
     @Column(name = "created_by", nullable = false, updatable = false) private UUID createdBy;
     @Column(name = "expires_at", updatable = false) private Instant expiresAt;
     @Column(name = "accepted_at") private Instant acceptedAt;
@@ -96,6 +98,7 @@ public class ShipmentQuote {
     void adjustment(UUID adminId, String reason) { this.adjustedBy = adminId; this.adjustmentReason = reason; }
 
     void snapshot(String json) { this.pricingSnapshot = json; }
+    void fingerprint(String value) { this.inputFingerprint = value; }
 
     void awaitReview(String code, String reason) {
         status = QuoteStatus.AWAITING_MANUAL_REVIEW;
@@ -166,6 +169,7 @@ public class ShipmentQuote {
     public String getAdjustmentReason() { return adjustmentReason; }
     public UUID getAdjustedBy() { return adjustedBy; }
     public String getPricingSnapshot() { return pricingSnapshot; }
+    public String getInputFingerprint() { return inputFingerprint; }
     public UUID getCreatedBy() { return createdBy; }
     public Instant getExpiresAt() { return expiresAt; }
     public Instant getAcceptedAt() { return acceptedAt; }

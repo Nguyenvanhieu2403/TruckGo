@@ -75,15 +75,44 @@ public class QuoteFactory {
         if (!errors.isEmpty()) throw new FieldErrorException(HttpStatus.BAD_REQUEST, "Đơn hàng chưa đủ thông tin để báo giá", errors);
     }
 
+    /**
+     * Hash of what a provider-priced quote depends on: stops (order, address, coordinates, stop services), cargo,
+     * services, pickup time, vehicle requirement and choice, the exact rates of the applicable price table and the
+     * route provider. Any change yields a different fingerprint, and therefore a new version when re-priced.
+     */
+    public String fingerprint(Shipment s) {
+        Instant now = clock.instant();
+        VehicleChoice vehicle = chooseVehicle(s, now);
+        Map<String, Object> f = new LinkedHashMap<>();
+        f.put("stops", s.getStops().stream().sorted(Comparator.comparingInt(com.truckgo.shipment.ShipmentStop::getSequenceNo))
+                .map(x -> x.getSequenceNo() + "|" + x.getStopType() + "|" + x.getFullAddress() + "|" + x.getLatitude() + "|" + x.getLongitude() + "|"
+                        + x.getServices().stream().map(v -> v.getServiceCode() + "=" + v.getServiceValue()).sorted().toList()).toList());
+        f.put("cargo", List.of(s.getTotalWeightKg().toPlainString(), s.getTotalVolumeM3().toPlainString(), s.getTotalQuantity()));
+        f.put("services", s.getServices().stream().map(x -> x.getServiceCode() + "=" + x.getServiceValue()).sorted().toList());
+        f.put("pickupTime", String.valueOf(s.getPickupTime()));
+        f.put("vehicle", List.of(String.valueOf(s.getVehicleTypeCode()), s.getVehicleCount(), String.valueOf(s.getMinimumPayloadKg()), String.valueOf(vehicle.code())));
+        f.put("rates", vehicle.code() == null ? null : pricing.effectiveFor(vehicle.code(), now).map(ActiveRates::rates).orElse(null));
+        f.put("route", routes.name());
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(json.writeValueAsBytes(f)));
+        } catch (JsonProcessingException | java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
     public ShipmentQuote build(Shipment s, int version, UUID actor, DistanceInput distanceInput, BigDecimal manualAdjustment, UUID adjustedBy, String adjustmentReason) {
         Instant now = clock.instant();
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("input", Map.of("totalWeightKg", s.getTotalWeightKg(), "totalVolumeM3", s.getTotalVolumeM3(), "totalQuantity", s.getTotalQuantity(),
                 "stopCount", s.getStops().size(), "vehicleCount", s.getVehicleCount(), "requestedVehicleTypeCode", String.valueOf(s.getVehicleTypeCode()),
-                "pickupTime", String.valueOf(s.getPickupTime()), "services", s.getServices().stream().map(x -> x.getServiceCode() + "=" + x.getServiceValue()).toList()));
+                "pickupTime", String.valueOf(s.getPickupTime()), "services", s.getServices().stream().map(x -> x.getServiceCode() + "=" + x.getServiceValue()).toList(),
+                "stopServices", s.getStops().stream().flatMap(stop -> stop.getServices().stream()
+                        .map(x -> stop.getSequenceNo() + ":" + stop.getStopType() + ":" + x.getServiceCode() + "=" + x.getServiceValue())).toList()));
 
         VehicleChoice vehicle = chooseVehicle(s, now);
+        String fingerprint = distanceInput.verifiedKm() == null && manualAdjustment == null ? fingerprint(s) : null;
         ShipmentQuote quote = new ShipmentQuote(s.getId(), s.getShipmentCode(), version, actor, vehicle.code(), s.getVehicleCount());
+        quote.fingerprint(fingerprint);   // only provider-priced versions can be reused; admin-adjusted ones never are
         if (adjustedBy != null) quote.adjustment(adjustedBy, adjustmentReason);
         snapshot.put("vehicle", Map.of("code", String.valueOf(vehicle.code()), "autoSelected", vehicle.autoSelected()));
 
@@ -108,7 +137,10 @@ public class QuoteFactory {
                 LocalDateTime.ofInstant(s.getPickupTime(), shipmentProperties.businessZone()),
                 s.getServices().stream().map(x -> new PricingInput.SelectedService(x.getServiceCode(), x.getServiceName(),
                         catalogs.shipmentService(x.getServiceCode()).map(d -> d.valueType() == ServiceValueType.NUMBER).orElse(false), x.getServiceValue())).toList(),
-                manualAdjustment);
+                manualAdjustment,
+                s.getStops().stream().flatMap(stop -> stop.getServices().stream().map(x -> new PricingInput.StopService(stop.getSequenceNo(), stop.getStopType().name(),
+                        x.getServiceCode(), x.getServiceName(), catalogs.shipmentService(x.getServiceCode()).map(d -> d.valueType() == ServiceValueType.NUMBER).orElse(false),
+                        x.getServiceValue()))).toList());
         PricingResult result = PricingCalculator.calculate(rates.get().rates(), input);
         snapshot.put("rates", rates.get().rates());
         snapshot.put("pricingInput", input);

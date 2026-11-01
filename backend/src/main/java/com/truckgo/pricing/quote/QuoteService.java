@@ -49,9 +49,10 @@ public class QuoteService implements ShipmentPriceProvider {
     private final AdminAuditService audit;
     private final Clock clock;
     private final ApplicationEventPublisher events;
+    private final QuoteRateLimiter limiter;
 
     public QuoteService(ShipmentQuoteRepository quotes, ShipmentRepository shipments, QuoteFactory factory, QuoteMapper mapper, AdminAuditService audit, Clock clock,
-                        ApplicationEventPublisher events) {
+                        ApplicationEventPublisher events, QuoteRateLimiter limiter) {
         this.quotes = quotes;
         this.shipments = shipments;
         this.factory = factory;
@@ -59,6 +60,7 @@ public class QuoteService implements ShipmentPriceProvider {
         this.audit = audit;
         this.clock = clock;
         this.events = events;
+        this.limiter = limiter;
     }
 
     // ------------------------------------------------------------------ customer
@@ -72,6 +74,14 @@ public class QuoteService implements ShipmentPriceProvider {
         if (current.filter(q -> q.getStatus() == QuoteStatus.ACCEPTED).isPresent())
             throw new ConflictException("Báo giá đã được xác nhận; hãy sửa đơn nháp nếu cần báo giá mới");
         factory.validateShipment(shipment);
+        // Nothing changed and the quote is still valid: give the same quote instead of a new version.
+        Optional<ShipmentQuote> reusable = current.filter(q -> q.getStatus() == QuoteStatus.CALCULATED && !q.isExpiredAt(clock.instant())
+                && q.getInputFingerprint() != null && q.getInputFingerprint().equals(factory.fingerprint(shipment)));
+        if (reusable.isPresent()) {
+            log.info("Quote reused (order and prices unchanged) quote={}", reusable.get().getQuoteCode());
+            return mapper.toResponse(reusable.get(), shipment, true);
+        }
+        limiter.check(customerId, shipmentId);
         ShipmentQuote quote = newVersion(shipment, current, customerId, QuoteFactory.DistanceInput.fromProvider(), null, null, null);
         return mapper.toResponse(quote, shipment, true);
     }

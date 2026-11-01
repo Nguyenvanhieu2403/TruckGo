@@ -310,7 +310,7 @@ class PricingIntegrationTest extends IntegrationTestSupport {
         assertThat(history.findValuesAsText("status")).containsExactly("REJECTED", "SUPERSEDED");
     }
 
-    @Test void concurrentPreviewsKeepVersionsUniqueWithOneCurrentQuote() throws Exception {
+    @Test void concurrentIdenticalPreviewsCreateOneVersionAndOneCurrentQuote() throws Exception {
         createConfig(config("100000"));
         Session customer = customer();
         String id = draft(customer, draftBody()).get("id").asText();
@@ -324,10 +324,13 @@ class PricingIntegrationTest extends IntegrationTestSupport {
             results.add(pool.submit(task));
         }
         start.countDown();
-        for (Future<Object> r : results) r.get();
+        java.util.Set<String> codes = new java.util.HashSet<>();
+        for (Future<Object> r : results) codes.add(((com.truckgo.pricing.dto.QuoteDtos.QuoteResponse) r.get()).quoteCode());
         pool.shutdown();
+        // The order lock serialises them; the first prices the order, the others get that same still-valid quote.
         assertThat(jdbc.queryForList("select quote_version from shipment_quotes where shipment_id = ?::uuid order by quote_version", Integer.class, id))
-                .containsExactly(1, 2, 3, 4, 5);
+                .containsExactly(1);
+        assertThat(codes).hasSize(1);
         assertThat(jdbc.queryForObject("select count(*) from shipment_quotes where shipment_id = ?::uuid and status in ('PENDING','CALCULATED','AWAITING_MANUAL_REVIEW','ACCEPTED')",
                 Integer.class, id)).isEqualTo(1);
     }
