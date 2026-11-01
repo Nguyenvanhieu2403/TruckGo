@@ -158,15 +158,25 @@ Cache: JSON trong Redis, key `catalog:v1:*`, TTL `CATALOG_CACHE_TTL` (mặc đ�
 - nginx cho phép body tới 6 MB trên `/api/` (mặc định 1 MB sẽ chặn ảnh).
 - Image MinIO chính thức không còn tải được từ Docker Hub/quay.io; Compose và Testcontainers dùng bản build MinIO của Chainguard, pin theo digest.
 
-### Bản đồ và geocoding
+### Bản đồ và geocoding (miễn phí, OpenStreetMap)
 
-`GeocodingProvider` (package `geo`) có hai thao tác: `search` (gợi ý địa chỉ) và `geocode` (điền tọa độ). Có sẵn `none` (mặc định) và `google` (Google Geocoding API, giới hạn `country:VN`, ngôn ngữ `vi`); Mapbox/OpenStreetMap chỉ cần thêm một lớp cài interface này và một nhánh trong `GeoConfig`.
+Không cần API key. Ba dịch vụ dùng dữ liệu OpenStreetMap, cấu hình bằng biến môi trường:
 
-- `MAPS_GEOCODING_PROVIDER=none`: ô tìm địa chỉ ẩn, giao diện ghi rõ "nhập địa chỉ thủ công"; mọi chức năng tạo đơn chạy như cũ.
-- `MAPS_GEOCODING_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` (bật **Geocoding API** cho key; dùng chung key với Directions của Sprint 4): bước Địa điểm có ô "Tìm địa chỉ trên bản đồ"/"Dùng địa chỉ đã nhập", hiện gợi ý kèm độ chính xác và tọa độ. Chọn gợi ý chỉ điền **tọa độ**, không sửa các ô địa chỉ đã gõ; nếu điểm đã có tọa độ khác, hỏi xác nhận trước khi thay.
-- Kết quả được kiểm tra: tọa độ hợp lệ, không phải (0,0), nằm trong vùng phục vụ (`MAPS_SERVICE_MIN/MAX_LAT/LNG`, mặc định Việt Nam). Khi lưu đơn, điểm **chưa có tọa độ** chỉ được tự điền nếu nhà cung cấp trả về **kết quả chính xác, khớp toàn bộ** (không `APPROXIMATE`, không `partial_match`); không tìm thấy, khớp một phần hoặc nhà cung cấp lỗi → để trống. Tọa độ người dùng nhập không bao giờ bị ghi đè.
-- Kết quả được cache Redis (`MAPS_GEOCODING_CACHE_TTL`, key là hash của địa chỉ); mỗi người dùng tối đa `MAPS_GEOCODING_SEARCHES_PER_MINUTE` lượt tìm/phút để bảo vệ key. Key không bao giờ được ghi log hay trả về client.
-- API: `GET /api/v1/geo/status` → `{provider, enabled}`; `GET /api/v1/geo/search?q=&limit=` → gợi ý; `503 GEOCODING_DISABLED` khi chưa cấu hình, `503 GEOCODING_UNAVAILABLE` khi nhà cung cấp lỗi (kèm hướng dẫn nhập thủ công). Cần đăng nhập.
+| Việc | Mặc định khi bật | Biến | Ghi chú |
+|---|---|---|---|
+| Tìm địa chỉ / tọa độ | Photon `photon.komoot.io` | `MAPS_GEOCODING_PROVIDER=photon` (`osm` = Nominatim, `google` = Google, `none` = nhập tay) | Server công cộng: dùng nhẹ |
+| Bản đồ trên trình duyệt | Tile `tile.openstreetmap.de` + Leaflet | `MAPS_TILE_URL`, `MAPS_TILE_ATTRIBUTION` | Bắt buộc ghi "© OpenStreetMap contributors" (đã hiển thị) |
+| Quãng đường cho báo giá | OSRM `router.project-osrm.org` | `MAPS_ROUTE_PROVIDER=osrm` | Cần tọa độ mọi điểm dừng; server demo |
+
+Tuân thủ chính sách dùng miễn phí: User-Agent định danh ứng dụng (`MAPS_OSM_USER_AGENT`), tối đa ~1 request/giây cho **toàn ứng dụng** (khóa Redis dùng chung giữa các instance, mất Redis thì giới hạn trong instance), kết quả được cache 24h, chỉ tìm khi người dùng bấm "Tìm" (không gợi ý theo từng phím). Khi lưu lượng lớn, tự host Photon/Nominatim/OSRM/tile server và đổi URL (`MAPS_PHOTON_URL`, `MAPS_NOMINATIM_URL`, `MAPS_OSRM_URL`, `MAPS_TILE_URL`). Lưu ý: ở một số mạng tên miền `openstreetmap.org` không phân giải được (đã gặp khi phát triển), nên mặc định dùng Photon và tile `openstreetmap.de`. CARTO basemaps hiện yêu cầu API key nên không dùng.
+
+**Không bao giờ tự đoán tọa độ:**
+- Lưu đơn **không** gọi dịch vụ bản đồ (lưu ~0,1s). Sau khi commit, một worker nền (1 luồng) điền tọa độ cho điểm dừng còn trống, chỉ khi kết quả **khớp đúng số nhà và tên đường** người dùng nhập (Photon tìm kiếm mờ: "Số 5 Hoàng Quốc Việt, Hà Nội" có thể trả về một trường học ở Bắc Ninh — kết quả như vậy bị hạ xuống "chỉ gần đúng" và không được dùng). Câu lệnh cập nhật có điều kiện: chỉ ghi khi điểm vẫn chưa có tọa độ **và** địa chỉ chưa bị sửa — không ghi đè dữ liệu người dùng.
+- Kết quả được kiểm tra: tọa độ hợp lệ, không phải (0,0), trong vùng phục vụ (`MAPS_SERVICE_MIN/MAX_LAT/LNG`, mặc định Việt Nam).
+- Bước Địa điểm: ô "Tìm địa chỉ trên bản đồ"/"Dùng địa chỉ đã nhập", gợi ý kèm mức độ ("Khớp số nhà", "Chỉ gần đúng – kiểm tra trên bản đồ"…) và **bản đồ nhỏ** của điểm đã chọn. Chọn gợi ý chỉ điền tọa độ, không sửa ô địa chỉ; thay tọa độ đã nhập phải xác nhận; chọn gợi ý gần đúng thì hiện cảnh báo kiểm tra trên bản đồ.
+- Trang theo dõi chuyến (khách) và dẫn đường (tài xế) vẽ vị trí tài xế và các điểm dừng có tọa độ trên bản đồ Leaflet; điểm chưa có tọa độ chỉ hiện trong danh sách.
+- Leaflet được tải lười (chỉ trang có bản đồ mới tải). `MAP_PROVIDER` vẫn là abstraction nếu muốn đổi sang Google Maps/Mapbox.
+- API: `GET /api/v1/geo/status` → `{provider, enabled, tiles, routeProvider}`; `GET /api/v1/geo/search?q=&limit=`; `503 GEOCODING_DISABLED`/`GEOCODING_UNAVAILABLE`; mỗi người dùng tối đa `MAPS_GEOCODING_SEARCHES_PER_MINUTE` lượt/phút.
 
 ### API đơn vận chuyển (`/api/v1`)
 
@@ -526,7 +536,7 @@ npm run e2e                  # báo cáo HTML: npx playwright show-report
 
 Test tự tạo tài khoản khách hàng với email ngẫu nhiên nên chạy lặp lại được trên cùng database; không nên chạy trên môi trường production.
 
-- Định giá (`pricing.spec.ts`, `pricing-ui.spec.ts`): cần tài khoản admin. Mỗi spec tạm tắt bảng giá đang bật của một loại xe (1 tấn, 1,5 tấn), tự tạo bảng giá riêng và **bật lại bảng giá gốc khi kết thúc**, nên chạy được cả trên stack có bảng giá thật/mẫu. `pricing-ui.spec.ts` kiểm tra phân tích giá với phụ phí đêm và cuối tuần khớp số tính tay (640.175 VNĐ), từ chối/lịch sử, điều chỉnh giảm giá và xác nhận, sửa đơn sau khi xác nhận, định dạng số tiếng Việt và hiển thị 390px.
+- Định giá (`pricing.spec.ts`, `pricing-ui.spec.ts`): cần tài khoản admin; kiểm tra luồng quản trị viên nhập quãng đường nên **tự bỏ qua** khi stack bật định tuyến tự động (`MAPS_ROUTE_PROVIDER` ≠ `none`; CI dùng `none`). Mỗi spec tạm tắt bảng giá đang bật của một loại xe (1 tấn, 1,5 tấn), tự tạo bảng giá riêng và **bật lại bảng giá gốc khi kết thúc**, nên chạy được cả trên stack có bảng giá thật/mẫu. `pricing-ui.spec.ts` kiểm tra phân tích giá với phụ phí đêm và cuối tuần khớp số tính tay (640.175 VNĐ), từ chối/lịch sử, điều chỉnh giảm giá và xác nhận, sửa đơn sau khi xác nhận, định dạng số tiếng Việt và hiển thị 390px.
 - Marketplace (`marketplace.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 2,5 tấn rồi bật lại khi xong. Tạo đơn có giá đã xác nhận, hai tài xế được duyệt; kiểm tra lọc theo khu vực không dấu, ẩn địa chỉ trước khi được chọn, gửi yêu cầu có xác nhận, khách nhận thông báo và chọn một tài xế, tài xế được chọn thấy địa chỉ, tài xế còn lại "Không được chọn", admin thấy lịch sử phân công, màn hình 390px.
 - Chuyến đi (`trips.spec.ts`): cần tài khoản admin; tạm tắt bảng giá xe 3,5 tấn rồi bật lại. Dùng **GPS giả lập của Chromium** (quyền `geolocation`): tài xế làm từng bước, bấm chia sẻ vị trí, khách thấy vị trí LIVE qua luồng SSE sau nginx và thấy vị trí mới khi xe di chuyển; báo sự cố và admin xử lý; nhập sai rồi đúng OTP (đọc từ hộp thông báo của khách) để hoàn thành.
 - Ảnh (`photo-lifecycle.spec.ts`): hủy đơn có ảnh → ảnh biến mất trên giao diện, API danh sách rỗng và link nội dung cũ trả 404; bước Địa điểm báo "nhập địa chỉ thủ công" khi chưa cấu hình bản đồ; API geocoding không mở cho người chưa đăng nhập.
@@ -584,7 +594,8 @@ Sprint 6 thêm: unit test chuyển trạng thái, điểm dừng, tọa độ, O
 - Chưa tính giá cước, phụ phí dịch vụ, khoảng cách (Sprint 4); `estimated_price`/`final_price` luôn null.
 - Chưa tích hợp bản đồ/geocoding; tọa độ do khách tự nhập hoặc để trống.
 - Đơn đã đăng không sửa được (hết hạn tự động đã có từ Sprint 5).
-- Bản đồ chỉ có Google; Mapbox/OSM cần thêm adapter. Gợi ý địa chỉ dùng Geocoding API (không phải Places Autocomplete theo từng phím gõ) để hạn chế chi phí; người dùng bấm "Tìm".
+- Dữ liệu số nhà ở Việt Nam trên OpenStreetMap còn thưa: nhiều địa chỉ chỉ tìm được tới mức đường/phường, khi đó tọa độ để trống (hoặc người dùng tự chọn gợi ý gần đúng). Server công cộng miễn phí chỉ dành cho lưu lượng nhỏ.
+- Báo giá bằng OSRM cần đủ tọa độ mọi điểm; nếu tọa độ chưa được điền (vừa lưu xong, hoặc không tìm được) thì vẫn chờ quản trị viên nhập quãng đường như trước.
 - Ảnh vẫn đi qua backend (stream, không presigned upload) để giữ nguyên kiểm tra quyền, magic bytes và metadata trước khi chấp nhận.
 - Ảnh của đơn đã hủy bị xóa ngay (không có thời gian lưu giữ để khiếu nại); cần thì thêm độ trễ vào hàng đợi.
 - E2E chỉ chạy Chromium (đã chạy trong CI trên stack Compose dùng một lần).
