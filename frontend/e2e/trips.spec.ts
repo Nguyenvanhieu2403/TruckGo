@@ -16,7 +16,7 @@ async function approvedDriver(request: APIRequestContext, adminToken: string, na
   const token = await apiToken(request, email, PASSWORD);
   const profile = (await (await request.post('/api/v1/drivers/me/submit-verification', { headers: auth(token) })).json()).data.id;
   expect((await request.post(`/api/v1/admin/drivers/${profile}/approve`, { headers: auth(adminToken) })).status()).toBe(200);
-  const vehicle = await request.post('/api/v1/vehicles', { headers: auth(token), data: { plateNumber: plate(), vehicleType: 'MEDIUM_TRUCK', maxPayloadKg: 4000,
+  const vehicle = await request.post('/api/v1/vehicles', { headers: auth(token), data: { plateNumber: plate(), vehicleType: 'MEDIUM_TRUCK', bodyTypeCode: 'CLOSED_BOX', maxPayloadKg: 4000,
     lengthCm: 500, widthCm: 210, heightCm: 210, registrationExpiryDate: new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10) } });
   expect(vehicle.status(), await vehicle.text()).toBe(201);
   const vehicleId = (await vehicle.json()).data.id;
