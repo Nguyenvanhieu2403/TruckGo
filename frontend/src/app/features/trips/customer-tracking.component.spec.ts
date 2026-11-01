@@ -37,7 +37,7 @@ describe('CustomerTrackingComponent', () => {
     const { fixture, el } = render(customerTrip());
     expect(el.querySelector('[data-testid=tracking-state]')?.textContent).toContain('Đang cập nhật');
     expect(el.textContent).toContain('21.02850, 105.85420');
-    expect(el.querySelector('a[href*="google.com/maps"]')).not.toBeNull();
+    expect(el.querySelector('a[href*="openstreetmap.org"]')).not.toBeNull();
     setStatus('open');
     events.next({ type: 'location', data: tracking({ latitude: 21.04, longitude: 105.86, state: 'STALE', ageSeconds: 120 }) });
     fixture.detectChanges();

@@ -1,5 +1,7 @@
 import { Component, OnInit, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { startWith } from 'rxjs';
+import { PointMapComponent } from '../../../shared/map/point-map.component';
 import { GeoApi, GeoCandidate, PRECISION_LABELS } from '../../../core/api/geo.api';
 import { toApiError } from '../../../core/api.service';
 import { StopForm } from '../shipment-form';
@@ -11,7 +13,7 @@ import { StopForm } from '../shipment-form';
 @Component({
   selector: 'app-address-search',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, PointMapComponent],
   template: `
   @if (enabled()) {
     <div class="lookup">
@@ -40,7 +42,11 @@ import { StopForm } from '../shipment-form';
             <button class="btn btn-ghost" type="button" (click)="pending.set(null)">Giữ tọa độ cũ</button></div>
         </div>
       }
-      @if (chosen(); as c) { <p class="muted small" data-testid="geo-chosen">Đã gắn tọa độ từ "{{ c.formattedAddress }}". Kiểm tra lại địa chỉ chi tiết bên dưới.</p> }
+      @if (chosen(); as c) {
+        <p class="muted small" data-testid="geo-chosen">Đã gắn tọa độ từ "{{ c.formattedAddress }}". Kiểm tra vị trí trên bản đồ và địa chỉ chi tiết bên dưới.</p>
+        @if (c.precision !== 'EXACT' && c.precision !== 'INTERPOLATED') { <div class="alert alert-warn" role="status">Gợi ý này không khớp đúng số nhà; hãy chắc chắn điểm trên bản đồ là nơi lấy/giao hàng.</div> }
+      }
+      <app-point-map [latitude]="lat()" [longitude]="lng()" [label]="stop().controls.addressDetail.value" [kind]="stop().controls.stopType.value === 'PICKUP' ? 'pickup' : 'delivery'" />
     </div>
   } @else if (checked()) {
     <p class="muted small" data-testid="geo-disabled">Chưa cấu hình dịch vụ bản đồ: nhập địa chỉ thủ công, tọa độ có thể để trống.</p>
@@ -63,8 +69,16 @@ export class AddressSearchComponent implements OnInit {
   protected readonly chosen = signal<GeoCandidate | null>(null);
   protected readonly precision = PRECISION_LABELS;
   protected query = '';
+  protected lat = signal<number | null>(null);
+  protected lng = signal<number | null>(null);
 
   ngOnInit(): void {
+    // Follow the coordinates whether they come from a suggestion or are typed by hand.
+    this.stop().valueChanges.pipe(startWith(this.stop().getRawValue())).subscribe(() => {
+      const v = this.stop().getRawValue();
+      this.lat.set(v.latitude);
+      this.lng.set(v.longitude);
+    });
     this.api.status().subscribe(s => { this.enabled.set(s.enabled); this.checked.set(true); });
   }
 

@@ -41,7 +41,7 @@ describe('AddressSearchComponent', () => {
     expect(req.request.params.get('q')).toBe('1 Trần Thái Tông, Cầu Giấy, Hà Nội');
     req.flush(ok([candidate]));
     fixture.detectChanges();
-    expect(el.textContent).toContain('Chính xác');
+    expect(el.textContent).toContain('Khớp số nhà');
     (el.querySelector('[data-testid=geo-result]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(stop.getRawValue().latitude).toBe(21.028512);
