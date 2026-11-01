@@ -90,15 +90,31 @@ app:
       max-latitude: ${MAPS_SERVICE_MAX_LAT:23.5}
       min-longitude: ${MAPS_SERVICE_MIN_LNG:102.0}
       max-longitude: ${MAPS_SERVICE_MAX_LNG:110.0}
-    # Road distance for pricing: none (admin enters a verified distance), osrm (free, stops need coordinates) or google.
+    # Road distance for pricing: none (admin enters a verified distance), google, mapbox or osrm (free; mapbox and
+    # osrm need coordinates on every stop). Exactly one is used; there is no automatic fallback.
     route-provider: ${MAPS_ROUTE_PROVIDER:none}
+    mapbox:
+      access-token: ${MAPBOX_ACCESS_TOKEN:}
+      base-url: ${MAPBOX_BASE_URL:https://api.mapbox.com}
+    route-retry:
+      max-attempts: ${MAPS_ROUTE_MAX_ATTEMPTS:2}
+      backoff: ${MAPS_ROUTE_BACKOFF:300ms}
+    route-cache:
+      ttl: ${MAPS_ROUTE_CACHE_TTL:7d}
+      # Bump to discard every cached route (e.g. after a road-network update).
+      version: ${MAPS_ROUTE_CACHE_VERSION:1}
+      lock-wait: ${MAPS_ROUTE_CACHE_LOCK_WAIT:5s}
+    route-quota:
+      # Provider calls for the whole application; 0 = unlimited. Past the limit quotes go to admin review.
+      per-hour: ${MAPS_ROUTE_QUOTA_PER_HOUR:500}
+      per-day: ${MAPS_ROUTE_QUOTA_PER_DAY:5000}
     max-reasonable-km: ${MAPS_MAX_REASONABLE_KM:3000}
     # Free OpenStreetMap services. The public servers allow light use only (~1 request/second for the whole app,
     # identifying User-Agent, cached results); set your own Nominatim/OSRM/tile URLs for production volume.
     osm:
       nominatim-url: ${MAPS_NOMINATIM_URL:https://nominatim.openstreetmap.org}
       photon-url: ${MAPS_PHOTON_URL:https://photon.komoot.io}
-      osrm-url: ${MAPS_OSRM_URL:https://router.project-osrm.org}
+      osrm-url: ${OSRM_BASE_URL:${MAPS_OSRM_URL:https://router.project-osrm.org}}
       user-agent: ${MAPS_OSM_USER_AGENT:TruckGo/1.0 (+https://github.com/Nguyenvanhieu2403/TruckGo)}
       spacing: 1100ms
       max-wait: 3s
@@ -118,6 +134,15 @@ app:
   pricing:
     cache-ttl: ${PRICING_CACHE_TTL:10m}
     quote-validity: ${QUOTE_VALIDITY:24h}
+    # Expires calculated quotes past their validity (reads also expire them, so this only keeps the data tidy).
+    expiry-job-enabled: ${QUOTE_EXPIRY_JOB_ENABLED:true}
+    expiry-interval: ${QUOTE_EXPIRY_INTERVAL:5m}
+    expiry-batch-size: ${QUOTE_EXPIRY_BATCH_SIZE:200}
+    # New quote versions a customer may create: per order within the window, and over all orders per hour (0 = off).
+    preview-limit:
+      per-shipment: ${QUOTE_PREVIEW_PER_SHIPMENT:5}
+      shipment-window: ${QUOTE_PREVIEW_WINDOW:10m}
+      per-customer-hour: ${QUOTE_PREVIEW_PER_CUSTOMER_HOUR:30}
   shipment:
     business-zone: ${SHIPMENT_BUSINESS_ZONE:Asia/Ho_Chi_Minh}
     min-pickup-lead: ${SHIPMENT_MIN_PICKUP_LEAD:15m}

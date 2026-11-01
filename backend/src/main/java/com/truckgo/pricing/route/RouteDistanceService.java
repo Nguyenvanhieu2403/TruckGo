@@ -10,4 +10,7 @@ import java.util.List;
  */
 public interface RouteDistanceService {
     RouteDistanceResult calculateDistance(List<ShipmentStop> stops);
+
+    /** Provider name, part of cache keys and of what a quote records. */
+    default String name() { return getClass().getSimpleName(); }
 }

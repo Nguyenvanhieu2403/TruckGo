@@ -11,6 +11,8 @@ import java.util.List;
 public class ManualRouteDistanceService implements RouteDistanceService {
     public static final String PROVIDER = "manual";
 
+    @Override public String name() { return PROVIDER; }
+
     @Override public RouteDistanceResult calculateDistance(List<ShipmentStop> stops) {
         return RouteDistanceResult.unavailable(PROVIDER, "NO_ROUTE_PROVIDER",
                 "Chưa cấu hình dịch vụ bản đồ; quản trị viên sẽ xác nhận quãng đường cho đơn này");

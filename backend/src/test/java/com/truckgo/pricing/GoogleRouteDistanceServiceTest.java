@@ -3,6 +3,7 @@ package com.truckgo.pricing;
 import com.truckgo.pricing.route.GoogleRouteDistanceService;
 import com.truckgo.pricing.route.ManualRouteDistanceService;
 import com.truckgo.pricing.route.RouteDistanceResult;
+import com.truckgo.pricing.route.RouteCall;
 import com.truckgo.pricing.route.RouteProperties;
 import com.truckgo.shipment.ShipmentStop;
 import com.truckgo.shipment.StopType;
@@ -31,14 +32,15 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class GoogleRouteDistanceServiceTest {
     private static final String URL = "https://maps.example.test/directions/json";
     private final RouteProperties properties = new RouteProperties("google",
-            new RouteProperties.Google("secret-key-123", URL, Duration.ofSeconds(1), Duration.ofSeconds(1)), new BigDecimal("3000"));
+            new RouteProperties.Google("secret-key-123", URL, Duration.ofSeconds(1), Duration.ofSeconds(1)), null, new BigDecimal("3000"),
+            new RouteProperties.RouteRetry(2, Duration.ZERO), null, null);
     private MockRestServiceServer server;
     private GoogleRouteDistanceService service;
 
     @BeforeEach void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        service = new GoogleRouteDistanceService(builder.build(), properties);
+        service = new GoogleRouteDistanceService(new RouteCall(builder.build(), 2, Duration.ZERO), properties);
     }
 
     static ShipmentStop stop(StopType type, int seq, String lat, String lng, String address) {
@@ -73,18 +75,42 @@ class GoogleRouteDistanceServiceTest {
         assertThat(result.reasonCode()).isEqualTo("ROUTE_NOT_FOUND");
     }
 
-    @Test void providerErrorsAndTimeoutsAreUnavailableAndNeverLeakTheKey() {
-        server.expect(requestTo(org.hamcrest.Matchers.startsWith(URL))).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+    @Test void providerErrorsAndTimeoutsAreRetriedOnceThenUnavailableAndNeverLeakTheKey() {
+        server.expect(org.springframework.test.web.client.ExpectedCount.times(2), requestTo(org.hamcrest.Matchers.startsWith(URL)))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
         RouteDistanceResult error = service.calculateDistance(List.of(stop(StopType.PICKUP, 1, "1", "1", null), stop(StopType.DELIVERY, 2, "2", "2", null)));
         assertThat(error.available()).isFalse();
         assertThat(error.reasonCode()).isEqualTo("PROVIDER_ERROR");
         assertThat(error.message()).doesNotContain("secret-key-123");
 
         server.reset();
-        server.expect(requestTo(org.hamcrest.Matchers.startsWith(URL))).andRespond(r -> { throw new ResourceAccessException("Read timed out " + r.getURI()); });
+        server.expect(org.springframework.test.web.client.ExpectedCount.times(2), requestTo(org.hamcrest.Matchers.startsWith(URL)))
+                .andRespond(r -> { throw new ResourceAccessException("Read timed out " + r.getURI()); });
         RouteDistanceResult timeout = service.calculateDistance(List.of(stop(StopType.PICKUP, 1, "1", "1", null), stop(StopType.DELIVERY, 2, "2", "2", null)));
         assertThat(timeout.available()).isFalse();
         assertThat(timeout.message()).doesNotContain("secret-key-123");
+        server.verify();
+    }
+
+    @Test void inputErrorsAreNotRetriedAndQuotaIsReportedAsSuch() {
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(), requestTo(org.hamcrest.Matchers.startsWith(URL)))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+        assertThat(service.calculateDistance(List.of(stop(StopType.PICKUP, 1, "1", "1", null), stop(StopType.DELIVERY, 2, "2", "2", null))).available()).isFalse();
+        server.verify();
+
+        server.reset();
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(), requestTo(org.hamcrest.Matchers.startsWith(URL)))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        assertThat(service.calculateDistance(List.of(stop(StopType.PICKUP, 1, "1", "1", null), stop(StopType.DELIVERY, 2, "2", "2", null))).reasonCode())
+                .isEqualTo("PROVIDER_QUOTA");
+        server.verify();
+
+        server.reset();
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(), requestTo(org.hamcrest.Matchers.startsWith(URL)))
+                .andRespond(withSuccess("{\"status\":\"OVER_QUERY_LIMIT\"}", MediaType.APPLICATION_JSON));
+        assertThat(service.calculateDistance(List.of(stop(StopType.PICKUP, 1, "1", "1", null), stop(StopType.DELIVERY, 2, "2", "2", null))).reasonCode())
+                .isEqualTo("PROVIDER_QUOTA");
+        server.verify();
     }
 
     @Test void deniedKeyAndAbsurdDistancesAreRejected() {

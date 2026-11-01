@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.truckgo.shipment.ShipmentStop;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -21,18 +21,22 @@ public class GoogleRouteDistanceService implements RouteDistanceService {
     public static final String PROVIDER = "google";
     private static final Logger log = LoggerFactory.getLogger(GoogleRouteDistanceService.class);
     private static final BigDecimal METERS_PER_KM = BigDecimal.valueOf(1000);
+    /** Google answers these with HTTP 200; only UNKNOWN_ERROR is worth another try. */
+    private static final Set<String> QUOTA = Set.of("OVER_QUERY_LIMIT", "OVER_DAILY_LIMIT");
 
-    private final RestClient http;
+    private final RouteCall call;
     private final String apiKey;
     private final String baseUrl;
     private final BigDecimal maxReasonableKm;
 
-    public GoogleRouteDistanceService(RestClient http, RouteProperties properties) {
-        this.http = http;
+    public GoogleRouteDistanceService(RouteCall call, RouteProperties properties) {
+        this.call = call;
         this.apiKey = properties.google().apiKey();
         this.baseUrl = properties.google().baseUrl();
         this.maxReasonableKm = properties.maxReasonableKm();
     }
+
+    @Override public String name() { return PROVIDER; }
 
     @Override public RouteDistanceResult calculateDistance(List<ShipmentStop> stops) {
         if (stops.size() < 2) return RouteDistanceResult.unavailable(PROVIDER, "NOT_ENOUGH_STOPS", "Cần ít nhất hai điểm dừng để tính quãng đường");
@@ -44,12 +48,17 @@ public class GoogleRouteDistanceService implements RouteDistanceService {
         if (stops.size() > 2) uri.queryParam("waypoints", stops.subList(1, stops.size() - 1).stream().map(GoogleRouteDistanceService::point).collect(Collectors.joining("|")));
         JsonNode body;
         try {
-            body = http.get().uri(uri.encode().build().toUri()).retrieve().body(JsonNode.class);
-        } catch (RuntimeException ex) {
-            log.warn("Route provider call failed: {}", ex.getClass().getSimpleName());
-            return RouteDistanceResult.unavailable(PROVIDER, "PROVIDER_ERROR", "Không kết nối được dịch vụ bản đồ; quản trị viên sẽ xác nhận quãng đường");
+            RouteCall.Response response = call.get(uri.encode().build().toUri(), PROVIDER);
+            body = response.body();
+            if ("UNKNOWN_ERROR".equals(body == null ? null : body.path("status").asText())) body = call.get(uri.encode().build().toUri(), PROVIDER).body();
+        } catch (RouteCall.FailedException ex) {
+            return RouteCall.unavailable(PROVIDER, ex);
         }
         String status = body == null ? "EMPTY" : body.path("status").asText("EMPTY");
+        if (QUOTA.contains(status)) {
+            log.warn("Route provider google quota: {}", status);
+            return RouteDistanceResult.unavailable(PROVIDER, "PROVIDER_QUOTA", "Dịch vụ bản đồ đã hết hạn mức truy vấn; quản trị viên sẽ xác nhận quãng đường");
+        }
         if (!"OK".equals(status)) {
             log.warn("Route provider returned status {}", status);
             String code = "ZERO_RESULTS".equals(status) || "NOT_FOUND".equals(status) ? "ROUTE_NOT_FOUND" : "PROVIDER_ERROR";

@@ -126,7 +126,7 @@ class OpenStreetMapTest {
         AtomicReference<String> path = new AtomicReference<>();
         server.expect(r -> path.set(r.getURI().getPath())).andRespond(withSuccess("""
                 {"code":"Ok","routes":[{"distance":104523.4,"duration":6120.5}]}""", MediaType.APPLICATION_JSON));
-        OsrmRouteDistanceService osrm = new OsrmRouteDistanceService(builder.build(), "https://osrm.example.test/", new BigDecimal("3000"), throttle(true));
+        OsrmRouteDistanceService osrm = new OsrmRouteDistanceService(new com.truckgo.pricing.route.RouteCall(builder.build(), 1, java.time.Duration.ZERO), "https://osrm.example.test/", new BigDecimal("3000"), throttle(true));
         RouteDistanceResult r = osrm.calculateDistance(List.of(stop(StopType.PICKUP, 1, "21.0285", "105.8542"), stop(StopType.DELIVERY, 2, "20.8449", "106.6881")));
         assertThat(path.get()).isEqualTo("/route/v1/driving/105.8542,21.0285;106.6881,20.8449");   // OSRM wants lng,lat
         assertThat(r.available()).isTrue();
@@ -135,7 +135,7 @@ class OpenStreetMapTest {
     }
 
     @Test void osrmNeedsCoordinatesAndNeverGuesses() {
-        OsrmRouteDistanceService osrm = new OsrmRouteDistanceService(RestClient.builder().build(), "https://osrm.example.test", new BigDecimal("3000"), throttle(true));
+        OsrmRouteDistanceService osrm = new OsrmRouteDistanceService(new com.truckgo.pricing.route.RouteCall(RestClient.builder().build(), 1, java.time.Duration.ZERO), "https://osrm.example.test", new BigDecimal("3000"), throttle(true));
         RouteDistanceResult missing = osrm.calculateDistance(List.of(stop(StopType.PICKUP, 1, "21.0285", "105.8542"), stop(StopType.DELIVERY, 2, null, null)));
         assertThat(missing.available()).isFalse();
         assertThat(missing.reasonCode()).isEqualTo("MISSING_COORDINATES");
@@ -143,10 +143,10 @@ class OpenStreetMapTest {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(r -> { }).andRespond(withSuccess("{\"code\":\"NoRoute\",\"routes\":[]}", MediaType.APPLICATION_JSON));
-        RouteDistanceResult noRoute = new OsrmRouteDistanceService(builder.build(), "https://osrm.example.test", new BigDecimal("3000"), throttle(true))
+        RouteDistanceResult noRoute = new OsrmRouteDistanceService(new com.truckgo.pricing.route.RouteCall(builder.build(), 1, java.time.Duration.ZERO), "https://osrm.example.test", new BigDecimal("3000"), throttle(true))
                 .calculateDistance(List.of(stop(StopType.PICKUP, 1, "21.0285", "105.8542"), stop(StopType.DELIVERY, 2, "10.7769", "106.7009")));
         assertThat(noRoute.reasonCode()).isEqualTo("ROUTE_NOT_FOUND");
-        RouteDistanceResult busy = new OsrmRouteDistanceService(RestClient.builder().build(), "https://osrm.example.test", new BigDecimal("3000"), throttle(false))
+        RouteDistanceResult busy = new OsrmRouteDistanceService(new com.truckgo.pricing.route.RouteCall(RestClient.builder().build(), 1, java.time.Duration.ZERO), "https://osrm.example.test", new BigDecimal("3000"), throttle(false))
                 .calculateDistance(List.of(stop(StopType.PICKUP, 1, "21.0285", "105.8542"), stop(StopType.DELIVERY, 2, "20.8449", "106.6881")));
         assertThat(busy.reasonCode()).isEqualTo("PROVIDER_BUSY");
     }
