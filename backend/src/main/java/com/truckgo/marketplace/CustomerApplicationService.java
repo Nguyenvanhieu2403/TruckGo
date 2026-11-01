@@ -100,6 +100,8 @@ public class CustomerApplicationService {
         if (shipment.getStatus() != ShipmentStatus.PUBLISHED) throw MarketplaceErrors.notAvailable("Đơn ở trạng thái " + shipment.getStatus() + ", không thể chọn tài xế");
         if (shipment.getPickupTime() == null || !clock.instant().isBefore(shipment.getPickupTime()))
             throw MarketplaceErrors.notAvailable("Đã quá giờ lấy hàng, không thể chọn tài xế");
+        // Only an order with a price the customer accepted can be assigned (the price the driver applied for).
+        if (views.acceptedQuote(shipmentId).isEmpty()) throw MarketplaceErrors.notAvailable("Đơn chưa có báo giá được xác nhận, không thể chọn tài xế");
 
         // 2. The application, the driver and the vehicle must all still qualify at this moment.
         DriverShipmentApplication application = applications.findByIdForUpdate(applicationId)
