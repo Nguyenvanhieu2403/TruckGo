@@ -13,6 +13,7 @@ import java.time.LocalDate;
 public record CreateVehicleRequest(
         @NotBlank(message = "Biển số không được để trống") @Size(max = 15, message = "Biển số quá dài") String plateNumber,
         @NotNull(message = "Loại xe không được để trống") VehicleType vehicleType,
+        @NotBlank(message = "Loại thùng xe không được để trống") @Size(max = 40) String bodyTypeCode,
         @NotNull(message = "Tải trọng không được để trống") @Positive(message = "Tải trọng phải lớn hơn 0") @Max(value = 60000, message = "Tải trọng tối đa 60.000 kg") Integer maxPayloadKg,
         @NotNull(message = "Chiều dài không được để trống") @Positive(message = "Chiều dài phải lớn hơn 0") @Max(value = 2000, message = "Chiều dài tối đa 2.000 cm") Integer lengthCm,
         @NotNull(message = "Chiều rộng không được để trống") @Positive(message = "Chiều rộng phải lớn hơn 0") @Max(value = 400, message = "Chiều rộng tối đa 400 cm") Integer widthCm,

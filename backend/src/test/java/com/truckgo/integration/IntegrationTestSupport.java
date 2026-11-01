@@ -113,7 +113,7 @@ abstract class IntegrationTestSupport {
     }
 
     String addApprovedVehicle(Session admin, Session driver, Map<String, Object> overrides) throws Exception {
-        var vehicle = new java.util.HashMap<String, Object>(Map.of("plateNumber", uniquePlate(), "vehicleType", "SMALL_TRUCK", "maxPayloadKg", 1500,
+        var vehicle = new java.util.HashMap<String, Object>(Map.of("plateNumber", uniquePlate(), "vehicleType", "SMALL_TRUCK", "bodyTypeCode", "CLOSED_BOX", "maxPayloadKg", 1500,
                 "lengthCm", 420, "widthCm", 180, "heightCm", 190, "registrationExpiryDate", java.time.LocalDate.now().plusYears(1).toString()));
         vehicle.putAll(overrides);
         MvcResult created = null;

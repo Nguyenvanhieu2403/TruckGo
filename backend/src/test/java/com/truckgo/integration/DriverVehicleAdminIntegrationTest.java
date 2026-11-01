@@ -109,11 +109,14 @@ class DriverVehicleAdminIntegrationTest extends IntegrationTestSupport {
         Map<String, Object> vehicle = new HashMap<>(Map.of("plateNumber", uniquePlate().replaceFirst("(\\d{2}[A-Z])(\\d{3})(\\d{2})", "$1-$2.$3"),
                 "vehicleType", "SMALL_TRUCK", "maxPayloadKg", 1500, "lengthCm", 420, "widthCm", 180, "heightCm", 190,
                 "registrationExpiryDate", LocalDate.now().plusYears(1).toString()));
+        vehicle.put("bodyTypeCode", "TARPAULIN");
         vehicle.put("driverId", UUID.randomUUID().toString());
         vehicle.put("verificationStatus", "APPROVED");
         JsonNode created = body(postAuthorized("/api/v1/vehicles", owner, vehicle)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.verificationStatus").value("NOT_SUBMITTED"))
+                .andExpect(jsonPath("$.data.bodyTypeCode").value("TARPAULIN"))
+                .andExpect(jsonPath("$.data.bodyTypeName").value("Thùng mui bạt"))
                 .andReturn()).get("data");
         String vehicleId = created.get("id").asText();
         String ownerProfileId = body(mvc.perform(get("/api/v1/drivers/me").header("Authorization", bearer(owner))).andReturn()).at("/data/id").asText();
@@ -121,8 +124,9 @@ class DriverVehicleAdminIntegrationTest extends IntegrationTestSupport {
 
         postAuthorized("/api/v1/vehicles", owner, Map.of("plateNumber", "51C-999.99", "vehicleType", "SMALL_TRUCK", "maxPayloadKg", 0, "lengthCm", -1,
                 "widthCm", 180, "heightCm", 190, "registrationExpiryDate", LocalDate.now().plusYears(1).toString()))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.data.maxPayloadKg").exists()).andExpect(jsonPath("$.data.lengthCm").exists());
-        postAuthorized("/api/v1/vehicles", other, Map.of("plateNumber", created.get("plateNumber").asText(), "vehicleType", "VAN", "maxPayloadKg", 900, "lengthCm", 300,
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.data.maxPayloadKg").exists()).andExpect(jsonPath("$.data.lengthCm").exists())
+                .andExpect(jsonPath("$.data.bodyTypeCode").exists());
+        postAuthorized("/api/v1/vehicles", other, Map.of("plateNumber", created.get("plateNumber").asText(), "vehicleType", "VAN", "bodyTypeCode", "CLOSED_BOX", "maxPayloadKg", 900, "lengthCm", 300,
                 "widthCm", 160, "heightCm", 170, "registrationExpiryDate", LocalDate.now().plusYears(1).toString()))
                 .andExpect(status().isConflict());
 

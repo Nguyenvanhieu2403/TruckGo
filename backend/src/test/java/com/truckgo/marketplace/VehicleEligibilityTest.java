@@ -32,9 +32,11 @@ class VehicleEligibilityTest {
     private static VehicleTypeDto type(String code, int payload) { return new VehicleTypeDto(code, code, BigDecimal.valueOf(payload), null, null, null); }
 
     /** 1-tonne order: 10 boxes of 60 kg, 60x60x90 cm. */
-    private static Shipment order(String vehicleType, String bodyType) {
+    private static Shipment order(String vehicleType, String bodyType) { return order(vehicleType, bodyType, 1); }
+
+    private static Shipment order(String vehicleType, String bodyType, int vehicles) {
         Shipment s = new Shipment("TG261110-ABCDEF", UUID.randomUUID());
-        s.setVehicleRequirement(vehicleType, bodyType, 1, null, null, null, null);
+        s.setVehicleRequirement(vehicleType, bodyType, vehicles, null, null, null, null);
         s.addItem(new ShipmentItem("Máy giặt", "ELECTRONICS", null, 10, new BigDecimal("60"), new BigDecimal("60"), new BigDecimal("60"), new BigDecimal("90"), Instant.now()));
         s.recalculateTotals();
         return s;
@@ -46,7 +48,9 @@ class VehicleEligibilityTest {
         return v;
     }
 
-    private static Vehicle good() { return vehicle(VehicleType.SMALL_TRUCK, 1200, 420, 180, 190, PICKUP.plusYears(1), VerificationStatus.APPROVED); }
+    private static Vehicle good() { return withBody(vehicle(VehicleType.SMALL_TRUCK, 1200, 420, 180, 190, PICKUP.plusYears(1), VerificationStatus.APPROVED), "CLOSED_BOX"); }
+
+    private static Vehicle withBody(Vehicle v, String body) { v.setBodyTypeCode(body); return v; }
 
     @Test void approvedVehicleOfTheRightClassIsEligible() {
         assertThat(eligibility.reasons(order("TRUCK_1T", "CLOSED_BOX"), good(), PICKUP)).isEmpty();
@@ -92,6 +96,32 @@ class VehicleEligibilityTest {
         assertThat(eligibility.reasons(cold, good(), PICKUP)).containsExactly("Đơn cần xe thùng đông lạnh");
         Vehicle reefer = vehicle(VehicleType.REFRIGERATED_TRUCK, 1200, 420, 180, 190, PICKUP.plusYears(1), VerificationStatus.APPROVED);
         assertThat(eligibility.reasons(cold, reefer, PICKUP)).isEmpty();
-        assertThat(eligibility.reasons(order("TRUCK_1T", "CONTAINER"), good(), PICKUP)).containsExactly("Đơn cần xe container");
+        assertThat(eligibility.reasons(order("TRUCK_1T", "CONTAINER"), good(), PICKUP)).containsExactly("Loại thùng xe không đúng yêu cầu của đơn");
+        // A small truck with a declared refrigerated body qualifies for cold chain too.
+        assertThat(eligibility.reasons(cold, withBody(vehicle(VehicleType.SMALL_TRUCK, 1200, 420, 180, 190, PICKUP.plusYears(1), VerificationStatus.APPROVED), "REFRIGERATED"), PICKUP)).isEmpty();
+        // A legacy container truck (no body declared) still counts as a container.
+        Vehicle box = vehicle(VehicleType.CONTAINER_TRUCK, 1200, 420, 180, 190, PICKUP.plusYears(1), VerificationStatus.APPROVED);
+        assertThat(eligibility.reasons(order("TRUCK_1T", "CONTAINER"), box, PICKUP)).isEmpty();
+    }
+
+    @Test void requestedBodyTypeMustMatchTheDeclaredOne() {
+        assertThat(eligibility.reasons(order("TRUCK_1T", "TARPAULIN"), good(), PICKUP)).containsExactly("Loại thùng xe không đúng yêu cầu của đơn");
+        assertThat(eligibility.reasons(order("TRUCK_1T", "TARPAULIN"), withBody(good(), "TARPAULIN"), PICKUP)).isEmpty();
+        assertThat(eligibility.reasons(order("TRUCK_1T", "ANY"), withBody(good(), "OPEN"), PICKUP)).isEmpty();
+        // Undeclared body: not assumed, the driver is told to declare it.
+        Vehicle legacy = vehicle(VehicleType.SMALL_TRUCK, 1200, 420, 180, 190, PICKUP.plusYears(1), VerificationStatus.APPROVED);
+        assertThat(eligibility.reasons(order("TRUCK_1T", "OPEN"), legacy, PICKUP))
+                .containsExactly("Xe chưa khai báo loại thùng; cập nhật thông tin xe để nhận đơn yêu cầu loại thùng");
+        assertThat(eligibility.reasons(order("TRUCK_1T", null), legacy, PICKUP)).isEmpty();
+    }
+
+    @Test void eachVehicleOfAMultiVehicleOrderCarriesItsShare() {
+        // 600 kg / 3.24 m³ split over two vehicles: 300 kg and 1.62 m³ each (box 200x120x100 = 2.4 m³).
+        Vehicle van = withBody(vehicle(VehicleType.VAN, 400, 200, 120, 100, PICKUP.plusYears(1), VerificationStatus.APPROVED), "CLOSED_BOX");
+        assertThat(eligibility.reasons(order("TRUCK_500KG", null, 2), van, PICKUP)).isEmpty();
+        assertThat(eligibility.reasons(order("TRUCK_500KG", null, 1), van, PICKUP))
+                .contains("Tải trọng xe nhỏ hơn tổng khối lượng hàng", "Tổng thể tích hàng lớn hơn thể tích thùng xe");
+        Vehicle tiny = withBody(vehicle(VehicleType.VAN, 250, 200, 120, 100, PICKUP.plusYears(1), VerificationStatus.APPROVED), "CLOSED_BOX");
+        assertThat(eligibility.reasons(order("TRUCK_500KG", null, 2), tiny, PICKUP)).contains("Tải trọng xe nhỏ hơn phần hàng mỗi xe phải chở");
     }
 }

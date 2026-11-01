@@ -1,5 +1,7 @@
 package com.truckgo.vehicle;
 
+import com.truckgo.catalog.CatalogService;
+import com.truckgo.catalog.dto.CatalogDtos.BodyTypeDto;
 import com.truckgo.common.domain.VerificationStatus;
 import com.truckgo.common.exception.ConflictException;
 import com.truckgo.common.exception.FieldErrorException;
@@ -25,11 +27,13 @@ import java.util.UUID;
 public class VehicleService {
     private final VehicleRepository vehicles;
     private final DriverService drivers;
+    private final CatalogService catalogs;
     private final Clock clock;
 
-    public VehicleService(VehicleRepository vehicles, DriverService drivers, Clock clock) {
+    public VehicleService(VehicleRepository vehicles, DriverService drivers, CatalogService catalogs, Clock clock) {
         this.vehicles = vehicles;
         this.drivers = drivers;
+        this.catalogs = catalogs;
         this.clock = clock;
     }
 
@@ -39,19 +43,21 @@ public class VehicleService {
         String plate = PlateNumberNormalizer.normalize(request.plateNumber());
         requireFutureExpiry(request.registrationExpiryDate());
         if (vehicles.existsByPlateNumber(plate)) throw FieldErrorException.conflict("plateNumber", "Biển số xe đã được đăng ký");
+        String bodyType = requireBodyType(request.bodyTypeCode(), request.vehicleType());
         Vehicle vehicle = new Vehicle(profile.getId(), plate, request.vehicleType(), request.maxPayloadKg(), request.lengthCm(),
                 request.widthCm(), request.heightCm(), request.registrationExpiryDate());
-        return VehicleResponse.from(vehicles.save(vehicle));
+        vehicle.setBodyTypeCode(bodyType);
+        return response(vehicles.save(vehicle));
     }
 
     @Transactional(readOnly = true)
     public List<VehicleResponse> listMine(UUID userId) {
         DriverProfile profile = drivers.requireProfile(userId);
-        return vehicles.findByDriverIdOrderByCreatedAtDesc(profile.getId()).stream().map(VehicleResponse::from).toList();
+        return vehicles.findByDriverIdOrderByCreatedAtDesc(profile.getId()).stream().map(this::response).toList();
     }
 
     @Transactional(readOnly = true)
-    public VehicleResponse getMine(UUID userId, UUID vehicleId) { return VehicleResponse.from(requireOwned(userId, vehicleId)); }
+    public VehicleResponse getMine(UUID userId, UUID vehicleId) { return response(requireOwned(userId, vehicleId)); }
 
     @Transactional
     public VehicleResponse update(UUID userId, UUID vehicleId, UpdateVehicleRequest request) {
@@ -62,8 +68,11 @@ public class VehicleService {
         if (plate != null && vehicles.existsByPlateNumberAndIdNot(plate, vehicle.getId()))
             throw FieldErrorException.conflict("plateNumber", "Biển số xe đã được đăng ký");
         if (request.registrationExpiryDate() != null) requireFutureExpiry(request.registrationExpiryDate());
-        vehicle.update(plate, request.vehicleType(), request.maxPayloadKg(), request.lengthCm(), request.widthCm(), request.heightCm(), request.registrationExpiryDate());
-        return VehicleResponse.from(vehicle);
+        VehicleType type = request.vehicleType() != null ? request.vehicleType() : vehicle.getVehicleType();
+        String bodyType = request.bodyTypeCode() != null ? requireBodyType(request.bodyTypeCode(), type)
+                : request.vehicleType() != null && vehicle.getBodyTypeCode() != null ? requireBodyType(vehicle.getBodyTypeCode(), type) : null;
+        vehicle.update(plate, request.vehicleType(), bodyType, request.maxPayloadKg(), request.lengthCm(), request.widthCm(), request.heightCm(), request.registrationExpiryDate());
+        return response(vehicle);
     }
 
     @Transactional
@@ -75,8 +84,28 @@ public class VehicleService {
             default -> { }
         }
         requireFutureExpiry(vehicle.getRegistrationExpiryDate());
+        if (vehicle.getBodyTypeCode() == null) throw FieldErrorException.invalid("bodyTypeCode", "Vui lòng khai báo loại thùng xe trước khi gửi duyệt");
         vehicle.markSubmitted();
-        return VehicleResponse.from(vehicle);
+        return response(vehicle);
+    }
+
+    private VehicleResponse response(Vehicle v) {
+        return VehicleResponse.from(v, v.getBodyTypeCode() == null ? null : catalogs.bodyType(v.getBodyTypeCode()).map(BodyTypeDto::name).orElse(v.getBodyTypeCode()));
+    }
+
+    /**
+     * The body type must be an active entry of the vehicle_body_types catalog other than "ANY" (that one only means
+     * "no requirement" on an order), and must not contradict the vehicle type (a refrigerated truck has a refrigerated
+     * body, a container truck carries a container).
+     */
+    private String requireBodyType(String code, VehicleType type) {
+        String value = code.trim().toUpperCase(java.util.Locale.ROOT);
+        if (BodyTypes.ANY.equals(value) || catalogs.bodyType(value).isEmpty())
+            throw FieldErrorException.invalid("bodyTypeCode", "Loại thùng xe không hợp lệ");
+        String required = BodyTypes.requiredFor(type);
+        if (required != null && !required.equals(value))
+            throw FieldErrorException.invalid("bodyTypeCode", type == VehicleType.REFRIGERATED_TRUCK ? "Xe đông lạnh phải có thùng đông lạnh" : "Xe container phải chọn loại thùng Container");
+        return value;
     }
 
     private Vehicle requireOwned(UUID userId, UUID vehicleId) {

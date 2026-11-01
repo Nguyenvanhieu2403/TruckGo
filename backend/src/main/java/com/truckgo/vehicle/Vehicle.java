@@ -24,6 +24,8 @@ public class Vehicle {
     @Column(name = "driver_id", nullable = false, updatable = false) private UUID driverId;
     @Column(name = "plate_number", nullable = false) private String plateNumber;
     @Enumerated(EnumType.STRING) @Column(name = "vehicle_type", nullable = false) private VehicleType vehicleType;
+    /** vehicle_body_types.code; null = not declared (vehicles registered before body types were recorded). */
+    @Column(name = "body_type_code") private String bodyTypeCode;
     @Column(name = "max_payload_kg", nullable = false) private Integer maxPayloadKg;
     @Column(name = "length_cm", nullable = false) private Integer lengthCm;
     @Column(name = "width_cm", nullable = false) private Integer widthCm;
@@ -56,9 +58,12 @@ public class Vehicle {
     @PrePersist void onCreate() { createdAt = Instant.now(); updatedAt = createdAt; }
     @PreUpdate void onUpdate() { updatedAt = Instant.now(); }
 
+    public void setBodyTypeCode(String bodyTypeCode) { this.bodyTypeCode = bodyTypeCode; }
+
     /** Applies non-null fields. Any change to an approved vehicle sends it back to PENDING_REVIEW. */
-    public void update(String plate, VehicleType type, Integer payload, Integer length, Integer width, Integer height, LocalDate expiry) {
+    public void update(String plate, VehicleType type, String bodyType, Integer payload, Integer length, Integer width, Integer height, LocalDate expiry) {
         boolean changed = false;
+        if (bodyType != null && !bodyType.equals(bodyTypeCode)) { bodyTypeCode = bodyType; changed = true; }
         if (plate != null && !plate.equals(plateNumber)) { plateNumber = plate; changed = true; }
         if (type != null && type != vehicleType) { vehicleType = type; changed = true; }
         if (payload != null && !payload.equals(maxPayloadKg)) { maxPayloadKg = payload; changed = true; }
@@ -88,6 +93,7 @@ public class Vehicle {
     public UUID getDriverId() { return driverId; }
     public String getPlateNumber() { return plateNumber; }
     public VehicleType getVehicleType() { return vehicleType; }
+    public String getBodyTypeCode() { return bodyTypeCode; }
     public Integer getMaxPayloadKg() { return maxPayloadKg; }
     public Integer getLengthCm() { return lengthCm; }
     public Integer getWidthCm() { return widthCm; }

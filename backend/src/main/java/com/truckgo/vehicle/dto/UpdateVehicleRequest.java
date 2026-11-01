@@ -11,6 +11,7 @@ import java.time.LocalDate;
 public record UpdateVehicleRequest(
         @Size(max = 15, message = "Biển số quá dài") String plateNumber,
         VehicleType vehicleType,
+        @Size(max = 40) String bodyTypeCode,
         @Positive(message = "Tải trọng phải lớn hơn 0") @Max(value = 60000, message = "Tải trọng tối đa 60.000 kg") Integer maxPayloadKg,
         @Positive(message = "Chiều dài phải lớn hơn 0") @Max(value = 2000, message = "Chiều dài tối đa 2.000 cm") Integer lengthCm,
         @Positive(message = "Chiều rộng phải lớn hơn 0") @Max(value = 400, message = "Chiều rộng tối đa 400 cm") Integer widthCm,
