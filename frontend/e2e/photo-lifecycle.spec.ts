@@ -36,13 +36,16 @@ test.describe('order photos and addresses without a map provider', () => {
     expect((await request.get(contentUrl, { headers: auth(token) })).status()).toBe(404);
   });
 
-  test('the stops step explains that addresses are entered manually', async ({ page, request }) => {
+  test('the stops step offers address lookup or says addresses are entered manually', async ({ page, request }) => {
     const email = uniqueEmail('geo');
     await request.post('/api/v1/auth/register/customer', { data: { fullName: 'Khách Địa Chỉ', email, password: PASSWORD, confirmPassword: PASSWORD } });
     await signIn(page, email, PASSWORD);
     await page.waitForURL(/\/customer$/);
     await page.goto('/customer/shipments/create');
-    await expect(page.getByTestId('geo-disabled').first()).toContainText('nhập địa chỉ thủ công');
+    const token = await apiToken(request, email, PASSWORD);
+    const geo = (await (await request.get('/api/v1/geo/status', { headers: auth(token) })).json()).data;
+    if (geo.enabled) await expect(page.getByPlaceholder('Tìm địa chỉ trên bản đồ để lấy tọa độ').first()).toBeVisible();
+    else await expect(page.getByTestId('geo-disabled').first()).toContainText('nhập địa chỉ thủ công');
     const status = await page.evaluate(async () => (await fetch('/api/v1/geo/status')).status);
     expect(status).toBe(401);   // the lookup API is never open to anonymous callers
   });

@@ -1,5 +1,5 @@
 import { Page, expect, test } from '@playwright/test';
-import { PASSWORD, apiToken, button, isolatePriceTables, signIn, uniqueEmail } from './support';
+import { PASSWORD, apiToken, routeProvider, button, isolatePriceTables, signIn, uniqueEmail } from './support';
 
 const adminEmail = process.env['E2E_ADMIN_EMAIL'];
 const adminPassword = process.env['E2E_ADMIN_PASSWORD'];
@@ -17,6 +17,8 @@ test.describe.serial('pricing: price table, manual review, accept', () => {
   let restore: () => Promise<void> = async () => undefined;
 
   test.beforeAll(async ({ browser, request }) => {
+    test.skip(await routeProvider(await apiToken(request, adminEmail!, adminPassword!)) !== 'none',
+      'These tests cover the manual-distance flow; the stack routes quotes automatically (MAPS_ROUTE_PROVIDER is set)');
     // Exclusive use of this vehicle type's price tables; the originals are re-activated afterwards.
     restore = await isolatePriceTables(await apiToken(request, adminEmail!, adminPassword!), VEHICLE);
 

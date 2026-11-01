@@ -86,3 +86,12 @@ export async function isolatePriceTables(adminToken: string, vehicle: string): P
 export async function horizontalOverflow(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
+
+/**
+ * The stack's road-distance provider. The pricing specs exercise the manual-review flow, which only happens when
+ * none is configured (as in CI); with OSRM/Google quotes are priced automatically and those specs skip.
+ */
+export async function routeProvider(token: string): Promise<string> {
+  const api = await request.newContext({ baseURL: process.env['E2E_BASE_URL'] ?? 'http://localhost:4200', extraHTTPHeaders: { Authorization: `Bearer ${token}` } });
+  try { return (await (await api.get('/api/v1/geo/status')).json()).data.routeProvider ?? 'none'; } finally { await api.dispose(); }
+}
