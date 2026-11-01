@@ -29,23 +29,32 @@ import java.util.List;
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Geocoding", description = "Tìm địa chỉ và tọa độ (khi đã cấu hình nhà cung cấp bản đồ)")
 public class GeoController {
-    public record GeoStatus(String provider, boolean enabled) { }
+    /** tiles: what the browser map draws (free OpenStreetMap by default); attribution must be shown with it. */
+    public record Tiles(String url, String attribution, int maxZoom) { }
+    /** routeProvider: how quotes get road distances (none = an admin confirms it). */
+    public record GeoStatus(String provider, boolean enabled, Tiles tiles, String routeProvider) { }
 
     private static final Logger log = LoggerFactory.getLogger(GeoController.class);
     private final GeocodingProvider geocoder;
     private final StringRedisTemplate redis;
     private final GeoProperties properties;
+    private final OsmProperties osm;
+    private final String routeProvider;
 
-    public GeoController(GeocodingProvider geocoder, StringRedisTemplate redis, GeoProperties properties) {
+    public GeoController(GeocodingProvider geocoder, StringRedisTemplate redis, GeoProperties properties, OsmProperties osm,
+                         com.truckgo.pricing.route.RouteProperties routes) {
         this.geocoder = geocoder;
         this.redis = redis;
         this.properties = properties;
+        this.osm = osm;
+        this.routeProvider = routes.routeProvider() == null || routes.routeProvider().isBlank() ? "none" : routes.routeProvider().trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     @GetMapping("/status")
     @Operation(summary = "Nhà cung cấp bản đồ có khả dụng không")
     public ApiResponse<GeoStatus> status(HttpServletRequest request) {
-        return ApiResponse.success("Request completed successfully", new GeoStatus(geocoder.name(), geocoder.enabled()), request.getRequestURI());
+        return ApiResponse.success("Request completed successfully", new GeoStatus(geocoder.name(), geocoder.enabled(),
+                osm.tileUrl() == null || osm.tileUrl().isBlank() ? null : new Tiles(osm.tileUrl(), osm.tileAttribution(), osm.tileMaxZoom()), routeProvider), request.getRequestURI());
     }
 
     @GetMapping("/search")

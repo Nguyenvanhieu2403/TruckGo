@@ -106,10 +106,17 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-truckgo-private}
       STORAGE_ORPHAN_DRY_RUN: ${STORAGE_ORPHAN_DRY_RUN:-true}
       SHIPMENT_BUSINESS_ZONE: ${SHIPMENT_BUSINESS_ZONE:-Asia/Ho_Chi_Minh}
-      # Road distance for quotes: none = an admin enters a verified distance; google needs GOOGLE_MAPS_API_KEY.
+      # Road distance for quotes: none = an admin enters a verified distance; osrm = free (stops need coordinates);
+      # google needs GOOGLE_MAPS_API_KEY.
       MAPS_ROUTE_PROVIDER: ${MAPS_ROUTE_PROVIDER:-none}
       # Address search/geocoding: none = manual addresses; google needs GOOGLE_MAPS_API_KEY (Geocoding API enabled).
       MAPS_GEOCODING_PROVIDER: ${MAPS_GEOCODING_PROVIDER:-none}
+      # Free OpenStreetMap-based services (light use on the public servers; point at your own for production).
+      MAPS_PHOTON_URL: ${MAPS_PHOTON_URL:-https://photon.komoot.io}
+      MAPS_NOMINATIM_URL: ${MAPS_NOMINATIM_URL:-https://nominatim.openstreetmap.org}
+      MAPS_OSRM_URL: ${MAPS_OSRM_URL:-https://router.project-osrm.org}
+      MAPS_TILE_URL: ${MAPS_TILE_URL:-https://tile.openstreetmap.de/{z}/{x}/{y}.png}
+      MAPS_TILE_ATTRIBUTION: ${MAPS_TILE_ATTRIBUTION:-© OpenStreetMap contributors}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       MAPS_CONNECT_TIMEOUT: ${MAPS_CONNECT_TIMEOUT:-3s}
       MAPS_READ_TIMEOUT: ${MAPS_READ_TIMEOUT:-5s}

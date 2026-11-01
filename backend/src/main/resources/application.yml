@@ -78,7 +78,7 @@ app:
       max-attempts-per-ip: ${LOGIN_MAX_ATTEMPTS_PER_IP:30}
       window: ${LOGIN_RATE_LIMIT_WINDOW:15m}
   maps:
-    # Address search/geocoding: none (manual addresses) or google (uses GOOGLE_MAPS_API_KEY below).
+    # Address search/geocoding: none (manual addresses), photon or osm (free, OpenStreetMap data) or google (GOOGLE_MAPS_API_KEY).
     geocoding:
       provider: ${MAPS_GEOCODING_PROVIDER:none}
       base-url: ${GOOGLE_GEOCODING_URL:https://maps.googleapis.com/maps/api/geocode/json}
@@ -90,9 +90,23 @@ app:
       max-latitude: ${MAPS_SERVICE_MAX_LAT:23.5}
       min-longitude: ${MAPS_SERVICE_MIN_LNG:102.0}
       max-longitude: ${MAPS_SERVICE_MAX_LNG:110.0}
-    # Road distance for pricing: none (admin enters a verified distance) or google.
+    # Road distance for pricing: none (admin enters a verified distance), osrm (free, stops need coordinates) or google.
     route-provider: ${MAPS_ROUTE_PROVIDER:none}
     max-reasonable-km: ${MAPS_MAX_REASONABLE_KM:3000}
+    # Free OpenStreetMap services. The public servers allow light use only (~1 request/second for the whole app,
+    # identifying User-Agent, cached results); set your own Nominatim/OSRM/tile URLs for production volume.
+    osm:
+      nominatim-url: ${MAPS_NOMINATIM_URL:https://nominatim.openstreetmap.org}
+      photon-url: ${MAPS_PHOTON_URL:https://photon.komoot.io}
+      osrm-url: ${MAPS_OSRM_URL:https://router.project-osrm.org}
+      user-agent: ${MAPS_OSM_USER_AGENT:TruckGo/1.0 (+https://github.com/Nguyenvanhieu2403/TruckGo)}
+      spacing: 1100ms
+      max-wait: 3s
+      # Map tiles for the browser: free OpenStreetMap tiles (openstreetmap.de mirror; light use). Attribution is mandatory.
+      # tile.openstreetmap.org works too where it resolves; for production volume use your own or a paid tile service.
+      tile-url: ${MAPS_TILE_URL:https://tile.openstreetmap.de/{z}/{x}/{y}.png}
+      tile-attribution: ${MAPS_TILE_ATTRIBUTION:© OpenStreetMap contributors}
+      tile-max-zoom: 19
     google:
       # Never commit a key; set GOOGLE_MAPS_API_KEY in the environment.
       api-key: ${GOOGLE_MAPS_API_KEY:}

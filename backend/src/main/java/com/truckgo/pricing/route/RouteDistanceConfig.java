@@ -15,7 +15,8 @@ public class RouteDistanceConfig {
     private static final Logger log = LoggerFactory.getLogger(RouteDistanceConfig.class);
 
     @Bean
-    RouteDistanceService routeDistanceService(RouteProperties properties) {
+    RouteDistanceService routeDistanceService(RouteProperties properties, com.truckgo.geo.OsmProperties osm,
+                                              org.springframework.data.redis.core.StringRedisTemplate redis) {
         String provider = properties.routeProvider() == null ? "none" : properties.routeProvider().trim().toLowerCase(Locale.ROOT);
         switch (provider) {
             case "none", "manual" -> {
@@ -30,6 +31,11 @@ public class RouteDistanceConfig {
                 JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(client);
                 factory.setReadTimeout(google.readTimeout());
                 return new GoogleRouteDistanceService(RestClient.builder().requestFactory(factory).build(), properties);
+            }
+            case "osrm" -> {
+                log.info("Route provider: OSRM at {} (free OpenStreetMap routing; stops need coordinates)", osm.osrmUrl());
+                return new OsrmRouteDistanceService(com.truckgo.geo.GeoConfig.osmClient(osm, properties), osm.osrmUrl(), properties.maxReasonableKm(),
+                        new com.truckgo.geo.ProviderThrottle(redis, "osrm", osm.spacing(), osm.maxWait()));
             }
             default -> throw new IllegalStateException("Unsupported app.maps.route-provider: " + provider);
         }
