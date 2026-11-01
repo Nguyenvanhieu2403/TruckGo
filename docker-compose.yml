@@ -107,20 +107,32 @@ services:
       STORAGE_ORPHAN_DRY_RUN: ${STORAGE_ORPHAN_DRY_RUN:-true}
       SHIPMENT_BUSINESS_ZONE: ${SHIPMENT_BUSINESS_ZONE:-Asia/Ho_Chi_Minh}
       # Road distance for quotes: none = an admin enters a verified distance; osrm = free (stops need coordinates);
-      # google needs GOOGLE_MAPS_API_KEY.
+      # mapbox needs MAPBOX_ACCESS_TOKEN; google needs GOOGLE_MAPS_API_KEY.
       MAPS_ROUTE_PROVIDER: ${MAPS_ROUTE_PROVIDER:-none}
       # Address search/geocoding: none = manual addresses; google needs GOOGLE_MAPS_API_KEY (Geocoding API enabled).
       MAPS_GEOCODING_PROVIDER: ${MAPS_GEOCODING_PROVIDER:-none}
       # Free OpenStreetMap-based services (light use on the public servers; point at your own for production).
       MAPS_PHOTON_URL: ${MAPS_PHOTON_URL:-https://photon.komoot.io}
       MAPS_NOMINATIM_URL: ${MAPS_NOMINATIM_URL:-https://nominatim.openstreetmap.org}
-      MAPS_OSRM_URL: ${MAPS_OSRM_URL:-https://router.project-osrm.org}
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-${MAPS_OSRM_URL:-https://router.project-osrm.org}}
+      MAPBOX_ACCESS_TOKEN: ${MAPBOX_ACCESS_TOKEN:-}
+      MAPS_ROUTE_MAX_ATTEMPTS: ${MAPS_ROUTE_MAX_ATTEMPTS:-2}
+      MAPS_ROUTE_CACHE_TTL: ${MAPS_ROUTE_CACHE_TTL:-7d}
+      MAPS_ROUTE_CACHE_VERSION: ${MAPS_ROUTE_CACHE_VERSION:-1}
+      MAPS_ROUTE_QUOTA_PER_HOUR: ${MAPS_ROUTE_QUOTA_PER_HOUR:-500}
+      MAPS_ROUTE_QUOTA_PER_DAY: ${MAPS_ROUTE_QUOTA_PER_DAY:-5000}
       MAPS_TILE_URL: ${MAPS_TILE_URL:-https://tile.openstreetmap.de/{z}/{x}/{y}.png}
       MAPS_TILE_ATTRIBUTION: ${MAPS_TILE_ATTRIBUTION:-© OpenStreetMap contributors}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       MAPS_CONNECT_TIMEOUT: ${MAPS_CONNECT_TIMEOUT:-3s}
       MAPS_READ_TIMEOUT: ${MAPS_READ_TIMEOUT:-5s}
       QUOTE_VALIDITY: ${QUOTE_VALIDITY:-24h}
+      QUOTE_EXPIRY_JOB_ENABLED: ${QUOTE_EXPIRY_JOB_ENABLED:-true}
+      QUOTE_EXPIRY_INTERVAL: ${QUOTE_EXPIRY_INTERVAL:-5m}
+      QUOTE_EXPIRY_BATCH_SIZE: ${QUOTE_EXPIRY_BATCH_SIZE:-200}
+      QUOTE_PREVIEW_PER_SHIPMENT: ${QUOTE_PREVIEW_PER_SHIPMENT:-5}
+      QUOTE_PREVIEW_WINDOW: ${QUOTE_PREVIEW_WINDOW:-10m}
+      QUOTE_PREVIEW_PER_CUSTOMER_HOUR: ${QUOTE_PREVIEW_PER_CUSTOMER_HOUR:-30}
       PRICING_CACHE_TTL: ${PRICING_CACHE_TTL:-10m}
       MARKETPLACE_APPLICATION_CUTOFF: ${MARKETPLACE_APPLICATION_CUTOFF:-1h}
       MARKETPLACE_MAX_PENDING_PER_DRIVER: ${MARKETPLACE_MAX_PENDING_PER_DRIVER:-10}

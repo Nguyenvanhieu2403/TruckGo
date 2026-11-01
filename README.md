@@ -227,8 +227,20 @@ Phí dịch vụ dùng **danh mục dịch vụ của Sprint 3** (không tạo d
 
 `RouteDistanceService.calculateDistance(stops)`:
 - `MAPS_ROUTE_PROVIDER=none` (mặc định) — `ManualRouteDistanceService`: không có quãng đường → báo giá `AWAITING_MANUAL_REVIEW`; ADMIN nhập quãng đường đã xác minh.
+- `MAPS_ROUTE_PROVIDER=osrm` — OSRM (`OSRM_BASE_URL`, mặc định server công cộng miễn phí), cần tọa độ mọi điểm, tối đa 100 điểm, giới hạn ~1 request/giây tới server công cộng.
+- `MAPS_ROUTE_PROVIDER=mapbox` — Mapbox Directions (`MAPBOX_ACCESS_TOKEN` bắt buộc), cần tọa độ, tối đa 25 điểm.
 - `MAPS_ROUTE_PROVIDER=google` — Google Directions API, chế độ lái xe, đi qua các điểm theo thứ tự (origin → waypoints → destination), cộng mọi chặng; dùng tọa độ nếu khách nhập, nếu không dùng địa chỉ có cấu trúc. Timeout `MAPS_CONNECT_TIMEOUT`/`MAPS_READ_TIMEOUT`; lỗi, không có tuyến, key bị từ chối hoặc quãng đường bất hợp lý (> `MAPS_MAX_REASONABLE_KM`) → chờ ADMIN. Bật Directions API trong Google Cloud, giới hạn key theo API và IP máy chủ, đặt key qua biến môi trường `GOOGLE_MAPS_API_KEY`; key không bao giờ được ghi log.
-- Không dùng khoảng cách đường chim bay để tính giá.
+- Không dùng khoảng cách đường chim bay để tính giá, **không tự chuyển sang provider khác** khi provider lỗi: báo giá vào `AWAITING_MANUAL_REVIEW` kèm mã lý do (`PROVIDER_ERROR`, `PROVIDER_QUOTA`, `PROVIDER_QUOTA_EXCEEDED`, `ROUTE_NOT_FOUND`, `MISSING_COORDINATES`, `TOO_MANY_STOPS`, `UNREASONABLE_DISTANCE`…).
+- Timeout kết nối/đọc riêng; chỉ thử lại lỗi tạm thời (lỗi mạng, 5xx, `UNKNOWN_ERROR` của Google) tối đa `MAPS_ROUTE_MAX_ATTEMPTS` lần với backoff `MAPS_ROUTE_BACKOFF`; lỗi đầu vào (4xx, không có tuyến) không thử lại; 429/`OVER_QUERY_LIMIT` báo là hết quota. Mọi provider trả cùng một kết quả (`RouteDistanceResult`: km, phút, provider, mã lỗi). Key/token không bao giờ được ghi log.
+
+#### Cache và quota tuyến đường
+
+`GuardedRouteDistanceService` bọc provider thật:
+- Khóa cache `route:v1:{provider}:{phiên bản cấu hình}:{sha256(tọa độ/địa chỉ theo đúng thứ tự điểm)}` — đổi thứ tự điểm là tuyến khác; phiên bản cấu hình gồm `MAPS_ROUTE_CACHE_VERSION` + endpoint provider, đổi một trong hai là vô hiệu toàn bộ cache cũ. TTL `MAPS_ROUTE_CACHE_TTL` (mặc định 7 ngày). **Chỉ cache kết quả thành công**, không cache lỗi.
+- Single-flight: nhiều request cùng tuyến cùng lúc chỉ gọi provider một lần (trong instance bằng future dùng chung; giữa các instance bằng khóa Redis `SET NX`, request khác chờ cache tối đa `MAPS_ROUTE_CACHE_LOCK_WAIT`).
+- Quota theo giờ/ngày (UTC) `MAPS_ROUTE_QUOTA_PER_HOUR` / `MAPS_ROUTE_QUOTA_PER_DAY`, đếm bằng Redis; vượt quota → không gọi provider, báo giá chờ ADMIN (`PROVIDER_QUOTA_EXCEEDED`).
+- Redis lỗi → fail-open: bỏ cache, quota đếm trong bộ nhớ instance; vẫn tính được giá.
+- Metric Micrometer: `truckgo.route.cache{result=hit|miss}`, `truckgo.route.provider.calls`, `truckgo.route.quota.refused`; log hit/miss ở mức DEBUG.
 
 ### Báo giá
 
@@ -237,9 +249,19 @@ Trạng thái `PENDING, CALCULATED, AWAITING_MANUAL_REVIEW, ACCEPTED, REJECTED, 
 - Tạo phiên bản khóa dòng shipment (`SELECT … FOR UPDATE`) nên request đồng thời không tạo trùng phiên bản.
 - Cần ADMIN khi: không có quãng đường tin cậy, không có bảng giá đang hiệu lực cho loại xe, hoặc xe khách chọn có tải trọng danh nghĩa nhỏ hơn hàng. Nếu khách để "hệ thống gợi ý", chọn loại xe nhỏ nhất có bảng giá và đủ tải trọng danh nghĩa.
 - Đơn phải có kích thước mọi kiện hàng và thời gian lấy hàng mới tính giá được. Chỉ đơn `DRAFT`/`PUBLISHED` được báo giá.
-- Báo giá `CALCULATED` hết hạn sau `QUOTE_VALIDITY` (mặc định 24h); kiểm tra khi đọc/xác nhận/từ chối và lưu `EXPIRED`.
+- Báo giá `CALCULATED` hết hạn sau `QUOTE_VALIDITY` (mặc định 24h). `QuoteExpiryJob` chạy mỗi `QUOTE_EXPIRY_INTERVAL` (mặc định 5m, so sánh theo UTC), chuyển theo lô `QUOTE_EXPIRY_BATCH_SIZE` các báo giá `CALCULATED` quá hạn sang `EXPIRED` bằng một câu `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` — nhiều instance chạy cùng lúc không xử lý trùng, không đụng `ACCEPTED/REJECTED/SUPERSEDED`, không sửa snapshot/dòng giá, tăng `version` để thao tác cũ đang mở bị từ chối. Index một phần `idx_shipment_quotes_expiry`. Metric `truckgo.quotes.expired`. Đọc/xác nhận/từ chối vẫn kiểm tra hạn nên giữa hai lượt job API cũng trả `EXPIRED`. Tắt bằng `QUOTE_EXPIRY_JOB_ENABLED=false`.
+- **Không tạo phiên bản thừa**: mỗi báo giá lưu `input_fingerprint` (điểm dừng + dịch vụ tại điểm, hàng hóa, dịch vụ, giờ lấy hàng, loại xe, bảng giá đang dùng, provider). Bấm "Tính giá" khi dữ liệu không đổi và báo giá hiện hành còn hiệu lực → trả lại báo giá đó (không tốn lượt, không gọi bản đồ).
+- **Giới hạn tính giá**: mỗi đơn tối đa `QUOTE_PREVIEW_PER_SHIPMENT` phiên bản trong `QUOTE_PREVIEW_WINDOW` (5 / 10 phút), mỗi khách `QUOTE_PREVIEW_PER_CUSTOMER_HOUR` phiên bản/giờ (30). Đếm từ PostgreSQL (nguồn sự thật, đúng khi nhiều instance). Vượt → `429 Too Many Requests` + header `Retry-After` (giây); frontend hiện thông báo và khóa nút tới hết thời gian chờ.
 - `ACCEPTED`: không tính lại, không điều chỉnh; tổng được ghi vào `shipments.estimated_price` (dùng cho Sprint 5). Nếu khách **sửa đơn nháp**, báo giá hiện hành (kể cả đã xác nhận) chuyển `SUPERSEDED` — số liệu cũ giữ nguyên — và khách phải báo giá lại.
 - ADMIN `manual-adjustment`: quãng đường đã xác minh và/hoặc khoản điều chỉnh có dấu (giảm giá là số âm, tổng không được âm), **lý do bắt buộc**; tạo phiên bản mới, lưu người/thời điểm/lý do trên báo giá và trong `admin_audit_logs`. `recalculate` dùng bảng giá hiện hành và giữ quãng đường đã xác minh.
+
+### Dịch vụ theo điểm dừng
+
+Danh mục dịch vụ có thêm `applies_to` (`ORDER` / `STOP` / `BOTH`) và `stop_types` (`PICKUP` / `DELIVERY` / `ANY`). Mặc định sau migration V8: **Hỗ trợ bốc hàng** chọn được cho cả đơn hoặc từng **điểm lấy**, **Hỗ trợ dỡ hàng** cho cả đơn hoặc từng **điểm giao**; các dịch vụ khác giữ `ORDER`.
+- Khách chọn trong bước **Địa điểm** ("Dịch vụ tại điểm này"), lưu ở `shipment_stop_services`. Backend kiểm tra dịch vụ có áp dụng cho loại điểm đó, giá trị hợp lệ, không trùng trong một điểm, và **không cho chọn cùng một dịch vụ vừa theo đơn vừa theo điểm** (chống tính hai lần).
+- Giá: phí đã cấu hình của dịch vụ (cùng bảng phí dịch vụ của bảng giá) tính **một lần cho mỗi điểm đã chọn** — `FIXED`/`PER_STOP` = đơn giá × số điểm, `PERCENTAGE` = % cước vận chuyển × số điểm, `PER_UNIT` = đơn giá × giá trị số × số điểm. Dòng giá có `appliesTo: "STOP"` và `stopSequences` (vd. `[2, 3]`), cộng vào `serviceSurcharge`; dòng theo đơn có `appliesTo: "ORDER"`.
+- Snapshot báo giá lưu dịch vụ của từng điểm (`seq:TYPE:CODE=VALUE`), nên báo giá cũ không đổi khi danh mục đổi. Đơn cũ (chỉ có dịch vụ theo đơn) tính giá như trước.
+- Frontend: chi tiết báo giá tách **Phí theo đơn** và **Phí theo điểm dừng** (ghi rõ "Điểm 2, 3"); chi tiết đơn hiện dịch vụ của từng điểm.
 
 ### Bảng giá
 
@@ -409,7 +431,14 @@ Sao chép `.env.example` → `.env`. Biến mới của Sprint 2:
 | `SHIPMENT_MIN_PICKUP_LEAD` | `15m` | Khoảng cách tối thiểu từ lúc đăng tới giờ lấy hàng |
 | `SHIPMENT_MAX_ATTACHMENT_SIZE`, `UPLOAD_MAX_FILE_SIZE`, `UPLOAD_MAX_REQUEST_SIZE` | `5MB`, `5MB`, `6MB` | Giới hạn ảnh |
 | `CATALOG_CACHE_TTL` | `1h` | TTL cache danh mục |
-| `MAPS_ROUTE_PROVIDER` | `none` | `none` (ADMIN xác minh quãng đường) hoặc `google` |
+| `MAPS_ROUTE_PROVIDER` | `none` | `none` (ADMIN xác minh quãng đường), `osrm`, `mapbox` hoặc `google` |
+| `OSRM_BASE_URL` | `https://router.project-osrm.org` | Server OSRM (nên tự host cho production); `MAPS_OSRM_URL` cũ vẫn được đọc |
+| `MAPBOX_ACCESS_TOKEN` / `MAPBOX_BASE_URL` | rỗng / `https://api.mapbox.com` | Bắt buộc khi `mapbox`; không commit |
+| `MAPS_ROUTE_MAX_ATTEMPTS` / `MAPS_ROUTE_BACKOFF` | `2` / `300ms` | Số lần gọi tối đa (chỉ lỗi tạm thời) |
+| `MAPS_ROUTE_CACHE_TTL` / `MAPS_ROUTE_CACHE_VERSION` / `MAPS_ROUTE_CACHE_LOCK_WAIT` | `7d` / `1` / `5s` | Cache tuyến đường; tăng version để xóa cache |
+| `MAPS_ROUTE_QUOTA_PER_HOUR` / `MAPS_ROUTE_QUOTA_PER_DAY` | `500` / `5000` | Quota gọi provider |
+| `QUOTE_EXPIRY_JOB_ENABLED` / `QUOTE_EXPIRY_INTERVAL` / `QUOTE_EXPIRY_BATCH_SIZE` | `true` / `5m` / `200` | Job hết hạn báo giá |
+| `QUOTE_PREVIEW_PER_SHIPMENT` / `QUOTE_PREVIEW_WINDOW` / `QUOTE_PREVIEW_PER_CUSTOMER_HOUR` | `5` / `10m` / `30` | Giới hạn tính giá |
 | `GOOGLE_MAPS_API_KEY` | rỗng | Bắt buộc khi `google`; không commit |
 | `GOOGLE_DIRECTIONS_URL`, `MAPS_CONNECT_TIMEOUT`, `MAPS_READ_TIMEOUT`, `MAPS_MAX_REASONABLE_KM` | Google mặc định, `3s`, `5s`, `3000` | |
 | `QUOTE_VALIDITY` | `24h` | Thời hạn báo giá đã tính |
@@ -548,7 +577,7 @@ Phạm vi đã kiểm thử: hash mật khẩu; đăng ký CUSTOMER/DRIVER; bỏ
 
 Sprint 3 thêm (backend): tạo nháp; thiếu điểm lấy/giao/hàng bị từ chối; tổng trọng lượng/thể tích chính xác và bỏ qua giá trị client; khách A không xem/sửa/đăng/hủy/xóa đơn khách B (404); tài xế 403; admin chỉ xem; đăng thiếu dữ liệu; không đăng lại; không hủy đơn `COMPLETED`/`ASSIGNED`; không xóa đơn đã đăng; cập nhật nháp thay đúng dữ liệu con, giữ ảnh, xung đột `version`; lịch sử trạng thái; mã đơn unique (DB + retry); UTC và bộ lọc ngày giờ Việt Nam; upload sai định dạng (415), quá dung lượng (413), người khác xóa ảnh (404); object bị xóa khỏi MinIO; cache danh mục trong Redis và xóa cache; Flyway V3; các ràng buộc DB. Frontend: model form và tính tổng, wizard (kiểm tra từng bước, thêm/xóa điểm và hàng, lưu nháp, đăng đơn, sửa nháp, ánh xạ lỗi), danh sách (lọc, phân trang, lỗi, hủy), trang chi tiết, upload ảnh và lỗi.
 
-Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khung giờ qua đêm, làm tròn, giá tối thiểu, điều chỉnh âm, dữ liệu không hợp lệ) và provider Google (nhiều chặng, lỗi, timeout, không lộ key); integration test định giá (ví dụ 360.000, tổng khớp chi tiết, không có/hết hạn bảng giá, provider lỗi → ADMIN nhập quãng đường có audit, quyền truy cập, hết hạn, đã xác nhận không đổi, sửa đơn thay thế báo giá, đồng thời, đổi bảng giá không ảnh hưởng báo giá cũ, validation/trùng thời gian, cache); frontend (panel báo giá, form bảng giá, xử lý báo giá) và E2E luồng định giá.
+Sprint 4 thêm: unit test Pricing Engine (từng thành phần, kết hợp, khung giờ qua đêm, làm tròn, giá tối thiểu, điều chỉnh âm, dữ liệu không hợp lệ) và provider Google (nhiều chặng, lỗi, timeout, không lộ key); integration test định giá (ví dụ 360.000, tổng khớp chi tiết, không có/hết hạn bảng giá, provider lỗi → ADMIN nhập quãng đường có audit, quyền truy cập, hết hạn, đã xác nhận không đổi, sửa đơn thay thế báo giá, đồng thời, đổi bảng giá không ảnh hưởng báo giá cũ, validation/trùng thời gian, cache); frontend (panel báo giá, form bảng giá, xử lý báo giá) và E2E luồng định giá. Hoàn thiện Sprint 4 thêm: provider Mapbox/OSRM/Google (thử lại chỉ lỗi tạm thời, quota), cache tuyến (hit/miss, thứ tự điểm, version, không cache lỗi, Redis lỗi, 6 request đồng thời → 1 lần gọi), phí dịch vụ theo điểm, integration test job hết hạn (3 luồng song song, không đụng trạng thái khác, API trả `EXPIRED`), dùng lại báo giá + 429/`Retry-After`, validation dịch vụ theo điểm, chặn chọn tài xế khi chưa có báo giá `ACCEPTED`; frontend: tách phí theo đơn/điểm, tự cập nhật khi hết hạn, đếm ngược rate limit, dịch vụ theo điểm trong form.
 
 Sprint 5 thêm: unit test điều kiện xe (duyệt, đăng kiểm, hạng xe, xoay kiện, thể tích, đông lạnh/container) và bộ lọc Marketplace; integration test luồng đầy đủ, 6 lượt chọn đồng thời, các mã lỗi, quyền sở hữu/vai trò, rút/từ chối, hủy và hết hạn đóng yêu cầu, thông báo, admin, xóa cache; frontend (danh sách/chi tiết Marketplace, khung chọn tài xế, chuông thông báo) và E2E Marketplace.
 
@@ -582,11 +611,10 @@ Sprint 6 thêm: unit test chuyển trạng thái, điểm dừng, tọa độ, O
 
 **Sprint 4**
 
-- Chưa có job định kỳ chuyển báo giá sang `EXPIRED`; trạng thái hết hạn được áp dụng khi báo giá được đọc/xác nhận/từ chối.
-- Mới có Google Directions; Mapbox/OSRM cần thêm adapter cho `RouteDistanceService`. Không có quota/cache kết quả tuyến đường.
-- Mỗi lần khách bấm "Tính giá" tạo một phiên bản mới; chưa giới hạn tần suất.
-- Đăng đơn chưa bắt buộc có báo giá đã xác nhận (giữ hành vi Sprint 3); từ Sprint 5 chỉ đơn có báo giá `ACCEPTED` mới lên Marketplace.
-- Phí dịch vụ áp theo đơn, chưa phân biệt điểm lấy/điểm giao (vd. bốc ở điểm lấy, dỡ ở điểm giao).
+- Mapbox và OSRM cần tọa độ mọi điểm (Google dùng được địa chỉ). Quota đếm theo cửa sổ giờ/ngày cố định (UTC), không phải cửa sổ trượt; Redis lỗi thì quota chỉ đếm trong từng instance.
+- Giới hạn tính giá đếm số phiên bản đã tạo; lần bấm trả lại báo giá cũ (dữ liệu không đổi) không bị tính.
+- Đăng đơn chưa bắt buộc có báo giá đã xác nhận (giữ hành vi Sprint 3); chỉ đơn có báo giá `ACCEPTED` mới lên Marketplace, và chọn tài xế cũng kiểm tra lại báo giá `ACCEPTED`.
+- Dịch vụ theo điểm hiện mới bật cho bốc/dỡ hàng; muốn bật thêm cần cập nhật `applies_to`/`stop_types` trong DB (chưa có màn hình ADMIN cho hai cột này). Phí theo điểm dùng cùng mức phí dịch vụ với phí theo đơn.
 
 
 **Sprint 3**
