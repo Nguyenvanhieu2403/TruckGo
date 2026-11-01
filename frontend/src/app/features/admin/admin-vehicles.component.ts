@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { AdminApi, AdminVehicle, VEHICLE_TYPE_LABELS } from '../../core/api/account.api';
 import { PageResponse, toApiError } from '../../core/api.service';
+import { BodyType, CatalogApi } from '../../core/api/catalog.api';
 import { StatusBadgeComponent } from '../../shared/status-badge.component';
 import { ReviewActionsComponent, ReviewDecision } from './review-actions.component';
 
@@ -24,7 +25,8 @@ import { ReviewActionsComponent, ReviewDecision } from './review-actions.compone
           <tbody>
             @for (row of data()!.items; track row.vehicle.id) {
               <tr>
-                <td><strong>{{ row.vehicle.plateNumber }}</strong><br><span class="muted">{{ typeLabels[row.vehicle.vehicleType] }}</span></td>
+                <td><strong>{{ row.vehicle.plateNumber }}</strong><br><span class="muted">{{ typeLabels[row.vehicle.vehicleType] }}</span>
+                  <br><span data-testid="admin-body-type">Loại thùng: @if (row.vehicle.bodyTypeCode) { <strong>{{ bodyName(row.vehicle.bodyTypeCode) }}</strong> } @else { <em>chưa khai báo</em> }</span></td>
                 <td>{{ row.vehicle.maxPayloadKg | number }} kg<br><span class="muted">{{ row.vehicle.lengthCm }}×{{ row.vehicle.widthCm }}×{{ row.vehicle.heightCm }} cm</span></td>
                 <td>{{ row.driverName || '—' }}<br>@if (row.driverVerificationStatus) { <app-status-badge [status]="row.driverVerificationStatus" /> }</td>
                 <td>{{ row.vehicle.registrationExpiryDate | date: 'dd/MM/yyyy' }}</td>
@@ -44,7 +46,9 @@ import { ReviewActionsComponent, ReviewDecision } from './review-actions.compone
 })
 export class AdminVehiclesComponent implements OnInit {
   private readonly api = inject(AdminApi);
+  private readonly catalog = inject(CatalogApi);
   protected readonly typeLabels = VEHICLE_TYPE_LABELS;
+  private readonly bodyTypes = signal<BodyType[]>([]);
   protected readonly data = signal<PageResponse<AdminVehicle> | null>(null);
   protected readonly page = signal(0);
   protected readonly loading = signal(true);
@@ -52,7 +56,12 @@ export class AdminVehiclesComponent implements OnInit {
   protected readonly error = signal<string | null>(null);
   protected readonly notice = signal<string | null>(null);
 
-  ngOnInit(): void { this.load(0); }
+  ngOnInit(): void {
+    this.load(0);
+    this.catalog.bodyTypes().subscribe({ next: list => this.bodyTypes.set(list), error: () => this.bodyTypes.set([]) });
+  }
+
+  protected bodyName(code: string): string { return this.bodyTypes().find(b => b.code === code)?.name ?? code; }
 
   load(page: number): void {
     this.loading.set(true);

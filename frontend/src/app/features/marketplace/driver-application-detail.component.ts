@@ -24,8 +24,9 @@ import { applicationBadge, formatKm } from './marketplace-labels';
         <div class="actions-row"><span [class]="badge(a.status)" data-testid="application-status">{{ labels[a.status] }}</span>
           @if (a.withdrawable) { <button class="btn btn-ghost" type="button" (click)="openWithdraw()">Rút yêu cầu</button> }</div></div>
       @if (a.status === 'ACCEPTED') { <div class="alert alert-success">Khách hàng đã chọn bạn cho đơn này. Liên hệ người gửi theo thông tin bên dưới.</div> }
+      @if (a.status === 'RELEASED') { <div class="alert alert-warn" data-testid="released">Bạn đã được gỡ khỏi đơn này trước khi chuyến bắt đầu. Địa chỉ và liên hệ không còn hiển thị.</div> }
       @if (a.status === 'PENDING') { <div class="alert alert-info">Đang chờ khách hàng chọn tài xế. Bạn sẽ nhận được thông báo khi có kết quả.</div> }
-      @if (a.responseReason) { <div class="alert alert-warn">{{ a.status === 'WITHDRAWN' ? 'Lý do rút' : 'Phản hồi' }}: {{ a.responseReason }}</div> }
+      @if (a.responseReason) { <div class="alert alert-warn">{{ a.status === 'WITHDRAWN' ? 'Lý do rút' : a.status === 'RELEASED' ? 'Lý do gỡ' : 'Phản hồi' }}: {{ a.responseReason }}</div> }
       <div class="detail-grid">
         <section class="card"><h2>Lộ trình</h2><app-stop-list [stops]="a.stops" [revealed]="a.status === 'ACCEPTED'" /></section>
         <aside>

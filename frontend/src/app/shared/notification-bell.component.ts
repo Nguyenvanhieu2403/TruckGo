@@ -1,12 +1,19 @@
 import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
-import { Subscription, interval, startWith, switchMap, catchError, of } from 'rxjs';
+import { Subscription, interval, startWith, switchMap, catchError, of, filter } from 'rxjs';
 import { AppNotification, NotificationApi } from '../core/api/notification.api';
 import { AuthService } from '../core/auth/auth.service';
 import { toApiError } from '../core/api.service';
+import { NotificationStreamClient } from '../core/notification-stream';
+import { StreamStatus } from '../core/trip-stream';
+import { ToastService } from './toast.service';
 
-/** Unread badge polled every 60 s (no push channel yet) and a dropdown with the latest notifications. */
+/**
+ * Unread badge and a dropdown with the latest notifications. New notifications arrive in realtime over the
+ * notification stream; while the stream is down the badge is polled every 60 s (and every 5 minutes as a safety net
+ * while it is up). Notifications are de-duplicated by id, so a replay after reconnecting never counts twice.
+ */
 @Component({
   selector: 'app-notification-bell',
   standalone: true,
@@ -59,12 +66,37 @@ export class NotificationBellComponent implements OnInit {
   private readonly page = signal(0);
   private readonly totalPages = signal(0);
   protected readonly hasMore = computed(() => this.page() + 1 < this.totalPages());
+  private readonly stream = inject(NotificationStreamClient);
+  private readonly toasts = inject(ToastService);
+  /** 'open' while realtime notifications are flowing. */
+  readonly live = signal<StreamStatus>('closed');
+  private readonly seen = new Set<string>();
+  private lastId: string | null = null;
   private poll?: Subscription;
+  private push?: Subscription;
+  private ticks = 0;
 
   ngOnInit(): void {
-    this.poll = interval(60_000).pipe(startWith(0), switchMap(() => this.api.unreadCount().pipe(catchError(() => of(null)))))
+    // Fallback polling: every minute while the stream is down, every fifth minute while it is up.
+    this.poll = interval(60_000).pipe(startWith(0), filter(() => this.live() !== 'open' || this.ticks++ % 5 === 0),
+      switchMap(() => this.api.unreadCount().pipe(catchError(() => of(null)))))
       .subscribe(count => { if (count !== null) this.unread.set(count); });
-    this.destroyRef.onDestroy(() => this.poll?.unsubscribe());
+    this.push = this.stream.connect(s => {
+      const reconnected = s === 'open' && this.live() !== 'open' && this.lastId !== null;
+      this.live.set(s);
+      if (reconnected) this.api.unreadCount().subscribe({ next: c => this.unread.set(c), error: () => undefined });
+    }, () => this.lastId).subscribe(n => this.receive(n));
+    this.destroyRef.onDestroy(() => { this.poll?.unsubscribe(); this.push?.unsubscribe(); });
+  }
+
+  /** A notification pushed by the server (live or replayed after a reconnect). */
+  receive(n: AppNotification): void {
+    this.lastId = n.id;
+    if (this.seen.has(n.id) || this.items().some(x => x.id === n.id)) return;
+    this.seen.add(n.id);
+    if (!n.read) this.unread.update(c => c + 1);
+    if (this.items().length || this.open()) this.items.update(list => [n, ...list]);
+    this.toasts.info(n.title);
   }
 
   toggle(): void {
@@ -100,8 +132,10 @@ export class NotificationBellComponent implements OnInit {
     const role = this.auth.role();
     if (n.referenceType === 'APPLICATION' && role === 'DRIVER') return ['/driver/applications', n.referenceId];
     if (n.referenceType === 'SHIPMENT' && role === 'CUSTOMER')
-      return n.type.startsWith('APPLICATION') || n.type === 'SHIPMENT_EXPIRED' ? ['/customer/shipments', n.referenceId] : ['/customer/shipments', n.referenceId, 'tracking'];
-    if (n.referenceType === 'SHIPMENT' && role === 'DRIVER') return ['/driver/trips', n.referenceId];
+      return n.type.startsWith('APPLICATION') || n.type.startsWith('SHIPMENT_') || n.type === 'ASSIGNMENT_RELEASED'
+        ? ['/customer/shipments', n.referenceId] : ['/customer/shipments', n.referenceId, 'tracking'];
+    // A driver removed from an order no longer has its trip.
+    if (n.referenceType === 'SHIPMENT' && role === 'DRIVER') return n.type === 'ASSIGNMENT_RELEASED' ? ['/driver/applications'] : ['/driver/trips', n.referenceId];
     if (n.referenceType === 'SHIPMENT' && role === 'ADMIN') return ['/admin/shipments', n.referenceId];
     return null;
   }
@@ -112,6 +146,8 @@ export class NotificationBellComponent implements OnInit {
     this.api.list(page).subscribe({
       next: data => {
         this.items.update(list => (page === 0 ? data.items : [...list, ...data.items]));
+        data.items.forEach(n => this.seen.add(n.id));
+        if (page === 0 && data.items.length && !this.lastId) this.lastId = data.items[0].id;
         this.page.set(data.page);
         this.totalPages.set(data.totalPages);
         this.loading.set(false);

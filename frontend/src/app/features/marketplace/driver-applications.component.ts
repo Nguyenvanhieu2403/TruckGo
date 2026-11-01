@@ -53,7 +53,7 @@ export class DriverApplicationsComponent implements OnInit {
   private readonly api = inject(DriverMarketplaceApi);
   protected readonly tabs: { value: ApplicationStatus | ''; label: string }[] = [
     { value: '', label: 'Tất cả' }, { value: 'PENDING', label: 'Đang chờ' }, { value: 'ACCEPTED', label: 'Được chọn' },
-    { value: 'REJECTED', label: 'Không được chọn' }, { value: 'WITHDRAWN', label: 'Đã rút' }, { value: 'EXPIRED', label: 'Đã đóng' },
+    { value: 'REJECTED', label: 'Không được chọn' }, { value: 'WITHDRAWN', label: 'Đã rút' }, { value: 'EXPIRED', label: 'Đã đóng' }, { value: 'RELEASED', label: 'Bị gỡ' },
   ];
   protected readonly labels = APPLICATION_STATUS_LABELS;
   protected readonly status = signal<ApplicationStatus | ''>('');

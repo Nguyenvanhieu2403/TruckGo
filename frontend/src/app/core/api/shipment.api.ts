@@ -31,7 +31,11 @@ export interface Stop extends Omit<StopPayload, 'services'> {
 export interface Item extends ItemPayload { id: string; categoryName: string; totalWeightKg: number; totalVolumeM3: number | null; }
 export interface SelectedService { serviceCode: string; serviceName: string; group: ServiceGroup | null; valueType: ServiceValueType | null; serviceValue: string; valueLabel: string | null; }
 export interface Attachment { id: string; fileName: string; contentType: string; fileSize: number; fileType: string; createdAt: string; contentUrl: string; }
-export interface StatusChange { oldStatus: ShipmentStatus | null; newStatus: ShipmentStatus; changedBy: string; changeReason: string | null; createdAt: string; }
+/** actorType SYSTEM: made by a named system task (systemActor), changedBy is null. */
+export interface StatusChange {
+  oldStatus: ShipmentStatus | null; newStatus: ShipmentStatus; changedBy: string | null; actorType?: 'USER' | 'SYSTEM'; systemActor?: string | null;
+  changeReason: string | null; createdAt: string;
+}
 export interface ShipmentWarning { code: string; message: string; }
 export interface ShipmentActions { editable: boolean; publishable: boolean; cancellable: boolean; deletable: boolean; attachmentsEditable: boolean; }
 export interface VehicleRequirement {
@@ -46,10 +50,13 @@ export interface ShipmentDetail {
   statusHistory: StatusChange[]; warnings: ShipmentWarning[]; actions: ShipmentActions;
   publishedAt: string | null; cancelledAt: string | null; cancellationReason: string | null; createdAt: string; updatedAt: string; version: number;
   assignment: AssignedDriver | null; applications: { pending: number; total: number } | null;
+  /** Every active assignment (several for an order needing several vehicles). */
+  assignments?: AssignedDriver[];
 }
 export interface AssignedDriver {
   driverId: string; fullName: string | null; phone: string | null; vehicleId: string; plateNumber: string | null; vehicleType: string | null;
   maxPayloadKg: number | null; assignedAt: string; applicationId: string | null;
+  assignmentId?: string | null; slotNo?: number; lead?: boolean; bodyTypeCode?: string | null;
 }
 export interface ShipmentSummary {
   id: string; shipmentCode: string; status: ShipmentStatus; createdAt: string; pickupTime: string | null; pickupAddress: string | null; deliveryAddress: string | null;

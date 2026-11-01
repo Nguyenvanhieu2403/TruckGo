@@ -7,6 +7,7 @@ import { toApiError } from '../../core/api.service';
 import { AttachmentPanelComponent } from './attachment-panel.component';
 import { QuotePanelComponent } from '../pricing/quote-panel.component';
 import { ApplicantsPanelComponent } from '../marketplace/applicants-panel.component';
+import { AssignmentsPanelComponent } from '../marketplace/assignments-panel.component';
 import { formatVnd } from '../../shared/money';
 import { CancelDialogComponent } from './cancel-dialog.component';
 import { SHIPMENT_STATUS_LABELS, formatKg, formatM3 } from './shipment-labels';
@@ -15,7 +16,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
 @Component({
   selector: 'app-shipment-detail',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent, ApplicantsPanelComponent],
+  imports: [DatePipe, DecimalPipe, RouterLink, ShipmentStatusBadgeComponent, AttachmentPanelComponent, CancelDialogComponent, QuotePanelComponent, ApplicantsPanelComponent, AssignmentsPanelComponent],
   template: `
   <main class="container">
     <a [routerLink]="admin() ? '/admin/shipments' : '/customer/shipments'" class="kicker">← Danh sách đơn</a>
@@ -73,8 +74,10 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
                 <dt>Nhận lúc</dt><dd>{{ d.assignedAt | date: 'HH:mm dd/MM/yyyy' }}</dd></dl>
             </section>
           }
+          @if (showAssignments(s)) { <app-assignments-panel [shipmentId]="s.id" [admin]="admin()" [refresh]="refreshes()" (changed)="reload()" /> }
           @if (!admin() && s.applications && (s.status === 'PUBLISHED' || s.applications.total > 0)) {
-            <app-applicants-panel [shipmentId]="s.id" [canChoose]="s.status === 'PUBLISHED' && !s.assignment" (changed)="reload()" />
+            <app-applicants-panel [shipmentId]="s.id" [canChoose]="s.status === 'PUBLISHED' && !s.assignment" [vehicleCount]="s.vehicle.vehicleCount"
+              [assignedCount]="s.assignments?.length ?? 0" [refresh]="refreshes()" (changed)="reload()" />
           }
           <app-quote-panel [shipmentId]="s.id" [owner]="!admin()" [shipmentOpen]="s.status === 'DRAFT' || s.status === 'PUBLISHED'" (changed)="reload()" />
           <section class="card"><h2>Tổng quan</h2>
@@ -94,7 +97,7 @@ import { ShipmentStatusBadgeComponent } from './shipment-status-badge.component'
           </section>
           <section class="card"><h2>Lịch sử trạng thái</h2>
             <ol class="timeline">@for (h of s.statusHistory; track h.createdAt) {
-              <li><strong>{{ statusLabels[h.newStatus] }}</strong><span class="muted">{{ h.createdAt | date: 'HH:mm dd/MM/yyyy' }}</span>@if (h.changeReason) { <em>{{ h.changeReason }}</em> }</li>
+              <li><strong>{{ statusLabels[h.newStatus] }}</strong><span class="muted">{{ h.createdAt | date: 'HH:mm dd/MM/yyyy' }}</span>@if (h.actorType === 'SYSTEM') { <span class="badge" data-testid="system-actor">Hệ thống</span> }@if (h.changeReason) { <em>{{ h.changeReason }}</em> }</li>
             }</ol>
           </section>
         </aside>
@@ -122,10 +125,19 @@ export class ShipmentDetailComponent implements OnInit {
   protected readonly kg = formatKg;
   protected readonly m3 = formatM3;
 
+  /** Counts reloads so the marketplace panels re-read their data when another panel changed the order. */
+  protected readonly refreshes = signal(0);
+
   ngOnInit(): void { this.reload(); }
+
+  /** Orders that reached the marketplace and need (or had) several vehicles, or already have a driver. */
+  showAssignments(s: ShipmentDetail): boolean {
+    return s.status !== 'DRAFT' && (s.vehicle.vehicleCount > 1 || !!s.assignments?.length || !!s.assignment);
+  }
 
   /** Re-reads the order, e.g. after a quote changed its price state. */
   reload(): void {
+    this.refreshes.update(n => n + 1);
     this.api.get(this.route.snapshot.paramMap.get('id') ?? '').subscribe({ next: s => this.shipment.set(s), error: (e: unknown) => this.error.set(toApiError(e).message) });
   }
 

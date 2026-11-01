@@ -11,7 +11,7 @@ import { ToastService } from '../../shared/toast.service';
 import { formatVnd } from '../../shared/money';
 import { formatKg, formatM3 } from '../shipments/shipment-labels';
 import { StopListComponent } from './stop-list.component';
-import { MARKETPLACE_ERROR_HINTS, applicationBadge, formatKm } from './marketplace-labels';
+import { MARKETPLACE_ERROR_HINTS, applicationBadge, bodyTypeLabel, formatKm } from './marketplace-labels';
 
 @Component({
   selector: 'app-driver-marketplace-detail',
@@ -51,7 +51,7 @@ import { MARKETPLACE_ERROR_HINTS, applicationBadge, formatKm } from './marketpla
                   @for (v of s.vehicles; track v.id) {
                     <label class="vehicle" [class.disabled]="!v.eligible">
                       <input type="radio" formControlName="vehicleId" [value]="v.id" [attr.disabled]="v.eligible ? null : true" />
-                      <span><strong>{{ v.plateNumber }}</strong> · {{ vehicleLabel(v) }} · {{ v.maxPayloadKg | number }} kg
+                      <span><strong>{{ v.plateNumber }}</strong> · {{ vehicleLabel(v) }} · {{ body(v.bodyTypeCode) }} · {{ v.maxPayloadKg | number }} kg
                         @if (!v.eligible) { <br><span class="error">{{ v.reasons.join('; ') }}</span> }</span></label>
                   }
                 </fieldset>
@@ -61,6 +61,7 @@ import { MARKETPLACE_ERROR_HINTS, applicationBadge, formatKm } from './marketpla
               </form>
             } @else if (s.unavailableReason) {
               <div class="alert alert-warn">{{ s.unavailableReason }}</div>
+              @if (s.scheduleConflicts.length) { <ul class="small" data-testid="schedule-conflicts">@for (c of s.scheduleConflicts; track c) { <li>{{ c }}</li> }</ul> }
               @if (!s.driverApproved) { <a class="btn btn-ghost" routerLink="/driver/verification">Xem trạng thái duyệt</a> }
               @else if (!hasEligibleVehicle()) { <a class="btn btn-ghost" routerLink="/driver/vehicles">Quản lý phương tiện</a> }
             }
@@ -69,6 +70,8 @@ import { MARKETPLACE_ERROR_HINTS, applicationBadge, formatKm } from './marketpla
           <section class="card"><h2>Yêu cầu xe</h2>
             <dl class="dl compact">
               <dt>Loại xe</dt><dd>{{ s.vehicle.vehicleTypeName || 'Không yêu cầu' }}</dd>
+              @if (s.vehicleCount > 1) { <dt>Số xe</dt><dd data-testid="vehicle-progress">Cần {{ s.vehicleCount }} xe · đã có {{ s.assignedVehicleCount }} · còn {{ s.vehicleCount - s.assignedVehicleCount }}
+                <br><span class="muted small">Mỗi xe chở một phần hàng; tài xế xe 1 thực hiện các bước của chuyến.</span></dd> }
               <dt>Loại thùng</dt><dd>{{ s.vehicle.bodyTypeName || 'Không yêu cầu' }}</dd>
               <dt>Tổng kiện</dt><dd>{{ s.totalQuantity }}</dd><dt>Trọng lượng</dt><dd>{{ kg(s.totalWeightKg) }}</dd><dt>Thể tích</dt><dd>{{ m3(s.totalVolumeM3) }}</dd>
               <dt>Giao trước</dt><dd>{{ s.deliveryDeadline ? (s.deliveryDeadline | date: 'HH:mm dd/MM/yyyy') : '—' }}</dd>
@@ -106,6 +109,7 @@ export class DriverMarketplaceDetailComponent implements OnInit {
   protected readonly confirmOpen = signal(false);
   protected readonly statusLabels = APPLICATION_STATUS_LABELS;
   protected readonly form = inject(FormBuilder).nonNullable.group({ vehicleId: ['', Validators.required], driverMessage: ['', Validators.maxLength(500)] });
+  protected readonly body = bodyTypeLabel;
   protected readonly hasEligibleVehicle = computed(() => (this.shipment()?.vehicles ?? []).some(v => v.eligible));
   protected readonly vnd = formatVnd;
   protected readonly kg = formatKg;
@@ -160,7 +164,7 @@ export class DriverMarketplaceDetailComponent implements OnInit {
         this.busy.set(false);
         const hint = err.code ? MARKETPLACE_ERROR_HINTS[err.code] : undefined;
         this.dialogError.set(hint ?? err.message);
-        if (err.code === 'SHIPMENT_ALREADY_ASSIGNED' || err.code === 'SHIPMENT_NOT_AVAILABLE') this.load();
+        if (err.code === 'SHIPMENT_ALREADY_ASSIGNED' || err.code === 'SHIPMENT_NOT_AVAILABLE' || err.code === 'SCHEDULE_CONFLICT') this.load();
       },
     });
   }

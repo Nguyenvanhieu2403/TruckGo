@@ -74,4 +74,15 @@ describe('DriverMarketplaceDetailComponent', () => {
     expect(el.querySelector('a[href="/driver/verification"]')).not.toBeNull();
     expect(el.querySelector('form')).toBeNull();
   });
+
+  it('explains a schedule conflict and shows the multi-vehicle progress and body types', () => {
+    const { el, button } = render({
+      canApply: false, unavailableReason: 'Bạn đã có chuyến khác trùng thời gian với đơn này', scheduleConflicts: ['Tài xế đã có chuyến TG261101-OTHER1 trùng thời gian'],
+      vehicleCount: 2, assignedVehicleCount: 1,
+    });
+    expect(el.textContent).toContain('Bạn đã có chuyến khác trùng thời gian với đơn này');
+    expect(el.querySelector('[data-testid=schedule-conflicts]')?.textContent).toContain('TG261101-OTHER1');
+    expect(el.querySelector('[data-testid=vehicle-progress]')?.textContent).toContain('Cần 2 xe · đã có 1 · còn 1');
+    expect(button('Gửi yêu cầu nhận đơn')).toBeUndefined();
+  });
 });

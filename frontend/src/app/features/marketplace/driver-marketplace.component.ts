@@ -7,7 +7,7 @@ import { APPLICATION_STATUS_LABELS, DriverMarketplaceApi, MarketplaceListItem, M
 import { CatalogApi } from '../../core/api/catalog.api';
 import { formatVnd } from '../../shared/money';
 import { formatKg } from '../shipments/shipment-labels';
-import { applicationBadge, formatKm } from './marketplace-labels';
+import { applicationBadge, bodyTypeLabel, formatKm, vehicleProgress } from './marketplace-labels';
 
 /** Open orders for drivers: area-level route, cargo, the agreed price and the application deadline. */
 @Component({
@@ -59,7 +59,8 @@ import { applicationBadge, formatKm } from './marketplace-labels';
                 <dl class="facts">
                   <dt>Lấy hàng</dt><dd>{{ row.shipment.pickupTime | date: 'HH:mm dd/MM' }}</dd>
                   <dt>Hàng</dt><dd>{{ row.shipment.totalQuantity }} kiện · {{ kg(row.shipment.totalWeightKg) }}</dd>
-                  <dt>Xe</dt><dd>{{ row.shipment.vehicleTypeName || 'Không yêu cầu' }}</dd>
+                  <dt>Xe</dt><dd>{{ row.shipment.vehicleTypeName || 'Không yêu cầu' }}@if (row.shipment.bodyTypeCode && row.shipment.bodyTypeCode !== 'ANY') { · {{ body(row.shipment.bodyTypeCode) }} }</dd>
+                  @if (row.shipment.vehicleCount > 1) { <dt>Số xe</dt><dd data-testid="vehicle-progress">{{ progress(row.shipment.vehicleCount, row.shipment.assignedVehicleCount) }}</dd> }
                   <dt>Quãng đường</dt><dd>{{ km(row.shipment.distanceKm) }}</dd>
                   <dt>Nhận đến</dt><dd>{{ row.shipment.applicationDeadline ? (row.shipment.applicationDeadline | date: 'HH:mm dd/MM') : '—' }}</dd>
                 </dl>
@@ -102,6 +103,8 @@ export class DriverMarketplaceComponent implements OnInit {
   protected readonly kg = formatKg;
   protected readonly km = formatKm;
   protected readonly badge = applicationBadge;
+  protected readonly body = bodyTypeLabel;
+  protected readonly progress = vehicleProgress;
 
   ngOnInit(): void {
     this.catalog.vehicleTypes().subscribe({ next: types => this.vehicleTypes.set(types), error: () => undefined });

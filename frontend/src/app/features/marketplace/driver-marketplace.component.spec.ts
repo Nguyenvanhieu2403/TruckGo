@@ -71,4 +71,15 @@ describe('DriverMarketplaceComponent', () => {
     fixture.detectChanges();
     expect(el.querySelector('[role=alert]')?.textContent).toContain('Máy chủ bận');
   });
+
+  it('shows how many vehicles a multi-vehicle order needs and has', () => {
+    const { fixture, el } = render();
+    http.expectOne(r => r.url === '/api/v1/driver/marketplace/shipments')
+      .flush(ok(page([listItem({ vehicleCount: 3, assignedVehicleCount: 1, bodyTypeCode: 'TARPAULIN' }), listItem({ id: 'sh-2' })])));
+    fixture.detectChanges();
+    const progress = el.querySelectorAll('[data-testid=vehicle-progress]');
+    expect(progress.length).toBe(1);
+    expect(progress[0].textContent).toContain('Cần 3 xe · đã có 1');
+    expect(el.textContent).toContain('Thùng mui bạt');
+  });
 });

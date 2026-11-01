@@ -16,14 +16,20 @@ export const VEHICLE_TYPE_LABELS: Record<VehicleType, string> = {
   CONTAINER_TRUCK: 'Xe container', REFRIGERATED_TRUCK: 'Xe đông lạnh',
 };
 
+/** bodyTypeCode null = not declared (vehicle registered before body types were recorded). */
 export interface Vehicle {
-  id: string; driverId: string; plateNumber: string; vehicleType: VehicleType; maxPayloadKg: number; lengthCm: number; widthCm: number; heightCm: number;
+  id: string; driverId: string; plateNumber: string; vehicleType: VehicleType; bodyTypeCode: string | null; bodyTypeName: string | null; maxPayloadKg: number; lengthCm: number; widthCm: number; heightCm: number;
   registrationExpiryDate: string; verificationStatus: VerificationStatus; rejectionReason: string | null;
   submittedAt: string | null; reviewedAt: string | null; createdAt: string; updatedAt: string;
 }
 
 export interface VehiclePayload {
-  plateNumber: string; vehicleType: VehicleType; maxPayloadKg: number; lengthCm: number; widthCm: number; heightCm: number; registrationExpiryDate: string;
+  plateNumber: string; vehicleType: VehicleType; bodyTypeCode: string; maxPayloadKg: number; lengthCm: number; widthCm: number; heightCm: number; registrationExpiryDate: string;
+}
+
+/** The body a vehicle type implies (mirrors the backend rule). */
+export function requiredBodyType(type: VehicleType): string | null {
+  return type === 'REFRIGERATED_TRUCK' ? 'REFRIGERATED' : type === 'CONTAINER_TRUCK' ? 'CONTAINER' : null;
 }
 
 export interface AdminDriver { profile: DriverProfile; fullName: string | null; email: string | null; phone: string | null; }

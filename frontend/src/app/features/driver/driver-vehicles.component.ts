@@ -1,7 +1,8 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { VEHICLE_TYPE_LABELS, Vehicle, VehicleApi, VehiclePayload, VehicleType } from '../../core/api/account.api';
+import { VEHICLE_TYPE_LABELS, Vehicle, VehicleApi, VehiclePayload, VehicleType, requiredBodyType } from '../../core/api/account.api';
+import { BodyType, CatalogApi } from '../../core/api/catalog.api';
 import { toApiError } from '../../core/api.service';
 import { StatusBadgeComponent } from '../../shared/status-badge.component';
 import { applyServerErrors, fieldError } from '../../shared/form-utils';
@@ -25,6 +26,14 @@ import { applyServerErrors, fieldError } from '../../shared/form-utils';
           <div class="field" [class.invalid]="err('vehicleType')">
             <label for="vehicleType">Loại xe</label>
             <select id="vehicleType" formControlName="vehicleType">@for (t of types; track t) { <option [value]="t">{{ typeLabels[t] }}</option> }</select>
+          </div>
+          <div class="field" [class.invalid]="err('bodyTypeCode')">
+            <label for="bodyTypeCode">Loại thùng</label>
+            <select id="bodyTypeCode" formControlName="bodyTypeCode">
+              <option value="" disabled>Chọn loại thùng</option>
+              @for (b of allowedBodies(); track b.code) { <option [value]="b.code">{{ b.name }}</option> }
+            </select>
+            @if (err('bodyTypeCode'); as e) { <span class="error">{{ e }}</span> }
           </div>
           <div class="field" [class.invalid]="err('registrationExpiryDate')">
             <label for="registrationExpiryDate">Hạn đăng kiểm</label><input id="registrationExpiryDate" type="date" formControlName="registrationExpiryDate" [min]="tomorrow" />
@@ -58,12 +67,15 @@ import { applyServerErrors, fieldError } from '../../shared/form-utils';
       @else if (vehicles().length === 0) { <div class="empty">Chưa có phương tiện nào.</div> }
       @else {
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Biển số</th><th>Loại</th><th>Tải trọng</th><th>Kích thước (D×R×C)</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th></th></tr></thead>
+          <thead><tr><th>Biển số</th><th>Loại</th><th>Loại thùng</th><th>Tải trọng</th><th>Kích thước (D×R×C)</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th></th></tr></thead>
           <tbody>
             @for (v of vehicles(); track v.id) {
               <tr>
                 <td><strong>{{ v.plateNumber }}</strong></td>
                 <td>{{ typeLabels[v.vehicleType] }}</td>
+                <td>@if (v.bodyTypeCode) { {{ v.bodyTypeName ?? bodyName(v.bodyTypeCode) }} }
+                  @else { <span class="badge badge--rejected" data-testid="body-undeclared">Chưa khai báo</span>
+                    <div class="muted small">Cần khai báo để nhận đơn yêu cầu loại thùng</div> }</td>
                 <td>{{ v.maxPayloadKg | number }} kg</td>
                 <td>{{ v.lengthCm }}×{{ v.widthCm }}×{{ v.heightCm }} cm</td>
                 <td>{{ v.registrationExpiryDate | date: 'dd/MM/yyyy' }}</td>
@@ -85,6 +97,9 @@ import { applyServerErrors, fieldError } from '../../shared/form-utils';
 })
 export class DriverVehiclesComponent implements OnInit {
   private readonly api = inject(VehicleApi);
+  private readonly catalog = inject(CatalogApi);
+  /** Body types from the catalog, without "ANY" (that only means "no requirement" on an order). */
+  protected readonly bodyTypes = signal<BodyType[]>([]);
   protected readonly types = Object.keys(VEHICLE_TYPE_LABELS) as VehicleType[];
   protected readonly typeLabels = VEHICLE_TYPE_LABELS;
   protected readonly tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
@@ -103,10 +118,28 @@ export class DriverVehiclesComponent implements OnInit {
     lengthCm: [0, [Validators.required, Validators.min(1), Validators.max(2000)]],
     widthCm: [0, [Validators.required, Validators.min(1), Validators.max(400)]],
     heightCm: [0, [Validators.required, Validators.min(1), Validators.max(500)]],
+    bodyTypeCode: ['', Validators.required],
     registrationExpiryDate: ['', Validators.required],
   });
+  private readonly vehicleType = signal<VehicleType>('SMALL_TRUCK');
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void {
+    this.load();
+    this.catalog.bodyTypes().subscribe({ next: list => this.bodyTypes.set(list.filter(b => b.code !== 'ANY')), error: () => this.bodyTypes.set([]) });
+    this.form.controls.vehicleType.valueChanges.subscribe(t => {
+      this.vehicleType.set(t);
+      const required = requiredBodyType(t);
+      if (required) this.form.controls.bodyTypeCode.setValue(required);
+    });
+  }
+
+  /** A refrigerated truck has a refrigerated body and a container truck a container; other types may have any body. */
+  protected allowedBodies(): BodyType[] {
+    const required = requiredBodyType(this.vehicleType());
+    return required ? this.bodyTypes().filter(b => b.code === required) : this.bodyTypes();
+  }
+
+  protected bodyName(code: string): string { return this.bodyTypes().find(b => b.code === code)?.name ?? code; }
 
   err(name: keyof VehiclePayload): string | null {
     return fieldError(this.form.controls[name], { required: 'Trường này là bắt buộc', min: 'Giá trị phải lớn hơn 0', max: 'Giá trị vượt giới hạn cho phép', maxlength: 'Giá trị quá dài' });
@@ -133,7 +166,8 @@ export class DriverVehiclesComponent implements OnInit {
   edit(v: Vehicle): void {
     this.editingId.set(v.id);
     this.editingApproved.set(v.verificationStatus === 'APPROVED');
-    this.form.reset({ plateNumber: v.plateNumber, vehicleType: v.vehicleType, maxPayloadKg: v.maxPayloadKg, lengthCm: v.lengthCm, widthCm: v.widthCm, heightCm: v.heightCm, registrationExpiryDate: v.registrationExpiryDate });
+    this.form.reset({ plateNumber: v.plateNumber, vehicleType: v.vehicleType, bodyTypeCode: v.bodyTypeCode ?? '', maxPayloadKg: v.maxPayloadKg, lengthCm: v.lengthCm,
+      widthCm: v.widthCm, heightCm: v.heightCm, registrationExpiryDate: v.registrationExpiryDate });
   }
 
   cancelEdit(): void {

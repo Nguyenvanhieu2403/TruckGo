@@ -1,11 +1,11 @@
-import { Component, OnInit, inject, input, output, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { toApiError } from '../../core/api.service';
 import { APPLICATION_STATUS_LABELS, Applicant, CustomerApplicationApi } from '../../core/api/marketplace.api';
 import { VEHICLE_TYPE_LABELS } from '../../core/api/account.api';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog.component';
 import { ToastService } from '../../shared/toast.service';
-import { MARKETPLACE_ERROR_HINTS, applicationBadge } from './marketplace-labels';
+import { MARKETPLACE_ERROR_HINTS, applicationBadge, bodyTypeLabel } from './marketplace-labels';
 
 type Pending = { kind: 'accept' | 'reject'; applicant: Applicant };
 
@@ -17,6 +17,7 @@ type Pending = { kind: 'accept' | 'reject'; applicant: Applicant };
   template: `
   <section class="card" aria-labelledby="applicants-title">
     <div class="head"><h2 id="applicants-title">Tài xế muốn nhận đơn</h2>
+      @if (vehicleCount() > 1) { <span class="badge" data-testid="applicants-progress">Đã chọn {{ assignedCount() }}/{{ vehicleCount() }} xe</span> }
       <button class="btn btn-ghost" type="button" (click)="load()" [disabled]="loading()" aria-label="Tải lại danh sách tài xế">Tải lại</button></div>
     @if (error()) { <div class="alert alert-error" role="alert">{{ error() }}</div> }
     @if (loading()) { @for (n of [1, 2]; track n) { <div class="skeleton-row"></div> } }
@@ -25,7 +26,7 @@ type Pending = { kind: 'accept' | 'reject'; applicant: Applicant };
         <article class="applicant" [class.closed]="a.status !== 'PENDING' && a.status !== 'ACCEPTED'" data-testid="applicant">
           <div class="row"><strong>{{ a.driver?.fullName || 'Tài xế' }}</strong><span [class]="badge(a.status)">{{ labels[a.status] }}</span></div>
           <div class="meta">Bằng lái hạng {{ a.driver?.licenseClass || '—' }} · {{ a.driver?.completedTrips ?? 0 }} chuyến đã hoàn thành trên TruckGo</div>
-          @if (a.vehicle; as v) { <div class="meta">Xe {{ v.plateNumber }} · {{ vehicleLabels[v.vehicleType] }} · {{ v.maxPayloadKg | number }} kg · thùng {{ v.lengthCm }}×{{ v.widthCm }}×{{ v.heightCm }} cm</div> }
+          @if (a.vehicle; as v) { <div class="meta">Xe {{ v.plateNumber }} · {{ vehicleLabels[v.vehicleType] }} · {{ bodyLabel(v.bodyTypeCode) }} · {{ v.maxPayloadKg | number }} kg · thùng {{ v.lengthCm }}×{{ v.widthCm }}×{{ v.heightCm }} cm</div> }
           @if (a.driverMessage) { <p class="message">“{{ a.driverMessage }}”</p> }
           @if (a.driver?.phone) { <div class="meta">Điện thoại: <a [href]="'tel:' + a.driver?.phone">{{ a.driver?.phone }}</a></div> }
           @if (!a.vehicleEligible) { <div class="alert alert-warn">Xe không còn phù hợp: {{ a.vehicleIssues.join('; ') }}</div> }
@@ -46,7 +47,7 @@ type Pending = { kind: 'accept' | 'reject'; applicant: Applicant };
   @if (pending(); as p) {
     @if (p.kind === 'accept') {
       <app-confirm-dialog [title]="'Chọn ' + (p.applicant.driver?.fullName || 'tài xế') + '?'" confirmLabel="Xác nhận chọn" [busy]="busy()" [error]="dialogError()"
-        message="Đơn sẽ được giao cho tài xế này và các yêu cầu khác sẽ tự động bị từ chối. Thao tác không thể hoàn tác."
+        [message]="acceptMessage()"
         (confirmed)="confirm(p, null)" (closed)="pending.set(null)" />
     } @else {
       <app-confirm-dialog [title]="'Từ chối ' + (p.applicant.driver?.fullName || 'tài xế') + '?'" confirmLabel="Từ chối" [danger]="true" [busy]="busy()" [error]="dialogError()"
@@ -61,9 +62,21 @@ type Pending = { kind: 'accept' | 'reject'; applicant: Applicant };
 })
 export class ApplicantsPanelComponent implements OnInit {
   readonly shipmentId = input.required<string>();
-  /** Choosing is only possible while the order is published and has no driver. */
+  /** Choosing is only possible while the order is published and still needs drivers. */
   readonly canChoose = input(false);
+  /** Vehicles the order needs and already has (several drivers are chosen one by one). */
+  readonly vehicleCount = input(1);
+  readonly assignedCount = input(0);
   readonly changed = output<void>();
+  /** Bumped by the page whenever the order changed elsewhere (another panel acted); the list is read again. */
+  readonly refresh = input(0);
+  private seenRefresh: number | null = null;
+  private readonly refreshed = effect(() => {
+    const n = this.refresh();
+    // The first value is the one the panel was created with (ngOnInit loads); later changes reload.
+    if (this.seenRefresh !== null && n !== this.seenRefresh) untracked(() => this.load());
+    this.seenRefresh = n;
+  });
   private readonly api = inject(CustomerApplicationApi);
   private readonly toast = inject(ToastService);
   protected readonly applicants = signal<Applicant[]>([]);
@@ -75,8 +88,18 @@ export class ApplicantsPanelComponent implements OnInit {
   protected readonly labels = APPLICATION_STATUS_LABELS;
   protected readonly vehicleLabels = VEHICLE_TYPE_LABELS;
   protected readonly badge = applicationBadge;
+  protected readonly bodyLabel = bodyTypeLabel;
 
   ngOnInit(): void { this.load(); }
+
+  protected acceptMessage(): string {
+    const left = this.vehicleCount() - this.assignedCount();
+    if (this.vehicleCount() > 1 && left > 1)
+      return `Tài xế này nhận 1 trong ${this.vehicleCount()} xe của đơn. Sau khi chọn, đơn còn cần ${left - 1} xe nữa.`;
+    return this.vehicleCount() > 1
+      ? 'Đây là xe cuối cùng đơn cần: đơn sẽ đủ tài xế và các yêu cầu còn lại sẽ tự động bị từ chối.'
+      : 'Đơn sẽ được giao cho tài xế này và các yêu cầu khác sẽ tự động bị từ chối. Trước khi chuyến bắt đầu, bạn vẫn có thể gỡ hoặc thay tài xế.';
+  }
 
   load(): void {
     this.loading.set(true);
