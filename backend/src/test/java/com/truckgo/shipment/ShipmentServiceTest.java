@@ -2,7 +2,6 @@ package com.truckgo.shipment;
 
 import com.truckgo.common.exception.ConflictException;
 import com.truckgo.common.exception.ResourceNotFoundException;
-import com.truckgo.geo.NoGeocodingProvider;
 import com.truckgo.security.AuthenticatedUser;
 import com.truckgo.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,7 +35,7 @@ class ShipmentServiceTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-11-01T00:00:00Z"), ZoneOffset.UTC);
     private final ShipmentProperties properties = new ShipmentProperties(ZoneId.of("Asia/Ho_Chi_Minh"), Duration.ofMinutes(15), 10, 50, 10, null, List.of());
     private final ShipmentService service = new ShipmentService(shipments, attachments, history,
-            new ShipmentDraftAssembler(ShipmentTestData.catalogs(), new NoGeocodingProvider(), clock), new ShipmentMapper(ShipmentTestData.catalogs()),
+            new ShipmentDraftAssembler(ShipmentTestData.catalogs(), clock), new ShipmentMapper(ShipmentTestData.catalogs()),
             codes, mock(com.truckgo.storage.StorageDeletionQueue.class), properties, clock, mock(org.springframework.context.ApplicationEventPublisher.class));
     private final UUID customerA = UUID.randomUUID();
     private final UUID customerB = UUID.randomUUID();
@@ -103,7 +102,7 @@ class ShipmentServiceTest {
         when(codes.next()).thenReturn("TG261101-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase());
         when(shipments.existsByShipmentCode(anyString())).thenReturn(false);
         Shipment shipment = new Shipment(codes.next(), owner);
-        new ShipmentDraftAssembler(ShipmentTestData.catalogs(), new NoGeocodingProvider(), clock).apply(shipment, ShipmentTestData.validDraft());
+        new ShipmentDraftAssembler(ShipmentTestData.catalogs(), clock).apply(shipment, ShipmentTestData.validDraft());
         when(shipments.findById(shipment.getId())).thenReturn(Optional.of(shipment));
         when(shipments.findByIdForUpdate(shipment.getId())).thenReturn(Optional.of(shipment));
         return shipment;

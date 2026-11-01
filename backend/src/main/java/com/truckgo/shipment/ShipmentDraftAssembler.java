@@ -5,8 +5,6 @@ import com.truckgo.catalog.dto.CatalogDtos.ServiceDefinitionDto;
 import com.truckgo.catalog.dto.CatalogDtos.ServiceOptionDto;
 import com.truckgo.common.exception.FieldErrorException;
 import com.truckgo.geo.AddressFormatter;
-import com.truckgo.geo.GeoPoint;
-import com.truckgo.geo.GeocodingProvider;
 import com.truckgo.shipment.dto.ShipmentRequests.DraftRequest;
 import com.truckgo.shipment.dto.ShipmentRequests.ItemRequest;
 import com.truckgo.shipment.dto.ShipmentRequests.ServiceRequest;
@@ -40,12 +38,10 @@ public class ShipmentDraftAssembler {
     private static final Duration MAX_SCHEDULE_AHEAD = Duration.ofDays(365);
 
     private final CatalogService catalogs;
-    private final GeocodingProvider geocoder;
     private final Clock clock;
 
-    public ShipmentDraftAssembler(CatalogService catalogs, GeocodingProvider geocoder, Clock clock) {
+    public ShipmentDraftAssembler(CatalogService catalogs, Clock clock) {
         this.catalogs = catalogs;
-        this.geocoder = geocoder;
         this.clock = clock;
     }
 
@@ -121,14 +117,9 @@ public class ShipmentDraftAssembler {
             catch (IllegalArgumentException ex) { errors.put(prefix + "contactPhone", "Số điện thoại di động không hợp lệ"); }
             if ((s.latitude() == null) != (s.longitude() == null)) errors.put(prefix + "latitude", "Nhập đủ cả vĩ độ và kinh độ hoặc để trống cả hai");
             String full = AddressFormatter.format(s.addressDetail(), s.ward(), s.district(), s.province());
+            // Blank coordinates are filled later, in the background, by StopCoordinateFiller (never while saving).
             BigDecimal lat = s.latitude();
             BigDecimal lng = s.longitude();
-            if (lat == null && lng == null) {
-                // Only a precise, full match fills blank coordinates; any provider problem leaves them blank.
-                Optional<GeoPoint> point;
-                try { point = geocoder.geocode(full); } catch (RuntimeException ex) { point = Optional.empty(); }
-                if (point.isPresent()) { lat = point.get().latitude(); lng = point.get().longitude(); }
-            }
             stops.add(new ShipmentStop(s.stopType(), position + 1, s.contactName().trim(), phone, s.province().trim(), blankToNull(s.district()),
                     blankToNull(s.ward()), s.addressDetail().trim(), full, lat, lng, blankToNull(s.note())));
         }

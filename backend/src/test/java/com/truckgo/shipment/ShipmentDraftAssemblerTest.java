@@ -1,7 +1,6 @@
 package com.truckgo.shipment;
 
 import com.truckgo.common.exception.FieldErrorException;
-import com.truckgo.geo.NoGeocodingProvider;
 import com.truckgo.shipment.dto.ShipmentRequests.DraftRequest;
 import com.truckgo.shipment.dto.ShipmentRequests.ItemRequest;
 import com.truckgo.shipment.dto.ShipmentRequests.ServiceRequest;
@@ -26,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ShipmentDraftAssemblerTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-11-01T00:00:00Z"), ZoneOffset.UTC);
-    private final ShipmentDraftAssembler assembler = new ShipmentDraftAssembler(ShipmentTestData.catalogs(), new NoGeocodingProvider(), clock);
+    private final ShipmentDraftAssembler assembler = new ShipmentDraftAssembler(ShipmentTestData.catalogs(), clock);
 
     private Shipment apply(DraftRequest request) {
         Shipment shipment = new Shipment("TG261101-AAAAAA", UUID.randomUUID());

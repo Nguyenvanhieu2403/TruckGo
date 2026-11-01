@@ -61,6 +61,7 @@ public class ShipmentService {
         assembler.apply(draft, request);
         // Assigned ids make Spring Data merge; the returned managed copy carries the generated timestamps.
         Shipment shipment = shipments.saveAndFlush(draft);
+        events.publishEvent(new ShipmentStopsSavedEvent(shipment.getId()));
         recordStatus(shipment, null, customerId, "Tạo đơn nháp");
         log.info("Shipment draft created shipmentId={} code={}", shipment.getId(), shipment.getShipmentCode());
         return detail(shipment, true);
@@ -82,6 +83,7 @@ public class ShipmentService {
         shipment.setEstimatedPrice(null);
         shipments.flush();
         events.publishEvent(new ShipmentDetailsChangedEvent(shipment.getId(), customerId));
+        events.publishEvent(new ShipmentStopsSavedEvent(shipment.getId()));
         return detail(shipment, true);
     }
 
