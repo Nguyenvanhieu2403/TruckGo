@@ -129,6 +129,17 @@ public class Shipment {
 
     public boolean isAssigned() { return assignedDriverId != null; }
 
+    /**
+     * ASSIGNED -> PUBLISHED: a driver was removed before the trip started, so the order needs a driver again. The lead
+     * driver/vehicle are cleared (the database requires that for published orders).
+     */
+    public void reopenForAssignment() {
+        transitionTo(ShipmentStatus.PUBLISHED);
+        assignedDriverId = null;
+        assignedVehicleId = null;
+        assignedAt = null;
+    }
+
     public boolean isAssignedTo(UUID driverId) { return assignedDriverId != null && assignedDriverId.equals(driverId); }
 
     public void markDriverArrived(Instant at) { transitionTo(ShipmentStatus.DRIVER_ARRIVED); driverArrivedAt = at; }

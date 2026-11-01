@@ -35,7 +35,9 @@ public final class ShipmentResponses {
 
     public record AttachmentResponse(UUID id, String fileName, String contentType, long fileSize, AttachmentFileType fileType, Instant createdAt, String contentUrl) { }
 
-    public record StatusHistoryResponse(ShipmentStatus oldStatus, ShipmentStatus newStatus, UUID changedBy, String changeReason, Instant createdAt) { }
+    /** actorType USER: changedBy is the user; SYSTEM: systemActor names the task and changedBy is null. */
+    public record StatusHistoryResponse(ShipmentStatus oldStatus, ShipmentStatus newStatus, UUID changedBy, String actorType, String systemActor,
+                                        String changeReason, Instant createdAt) { }
 
     public record VehicleRequirement(String vehicleTypeCode, String vehicleTypeName, BigDecimal vehicleTypeMaxPayloadKg, String bodyTypeCode, String bodyTypeName,
                                      int vehicleCount, BigDecimal minimumPayloadKg, BigDecimal minCargoLengthCm, BigDecimal minCargoWidthCm,
@@ -48,7 +50,8 @@ public final class ShipmentResponses {
                                  List<ServiceResponse> services, List<AttachmentResponse> attachments, List<StatusHistoryResponse> statusHistory,
                                  List<Warning> warnings, Actions actions, Instant publishedAt, Instant cancelledAt, String cancellationReason,
                                  Instant createdAt, Instant updatedAt, long version,
-                                 ShipmentAssignmentProvider.AssignedDriver assignment, ShipmentAssignmentProvider.ApplicationStats applications) { }
+                                 ShipmentAssignmentProvider.AssignedDriver assignment, ShipmentAssignmentProvider.ApplicationStats applications,
+                                 List<ShipmentAssignmentProvider.AssignedDriver> assignments) { }
 
     public record ShipmentSummary(UUID id, String shipmentCode, ShipmentStatus status, Instant createdAt, Instant pickupTime,
                                   String pickupAddress, String deliveryAddress, int deliveryStopCount, int totalQuantity, BigDecimal totalWeightKg,

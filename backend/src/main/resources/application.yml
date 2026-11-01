@@ -158,6 +158,15 @@ app:
     cache-ttl: ${MARKETPLACE_CACHE_TTL:30s}
     expiry-interval: ${MARKETPLACE_EXPIRY_INTERVAL:5m}
     expiry-job-enabled: ${MARKETPLACE_EXPIRY_JOB_ENABLED:true}
+    # Schedule check: a trip occupies its driver and vehicle from pickup until the delivery deadline (or pickup +
+    # default-trip-duration when there is none) plus schedule-buffer before the next trip may start.
+    schedule-buffer: ${MARKETPLACE_SCHEDULE_BUFFER:1h}
+    default-trip-duration: ${MARKETPLACE_DEFAULT_TRIP_DURATION:8h}
+  notifications:
+    # Realtime stream: closed after stream-timeout (the client reconnects with a fresh token and Last-Event-ID).
+    stream-timeout: ${NOTIFICATION_STREAM_TIMEOUT:10m}
+    heartbeat: ${NOTIFICATION_HEARTBEAT:25s}
+    replay-limit: ${NOTIFICATION_REPLAY_LIMIT:100}
   trip:
     # Delivery confirmation code: validity, wrong guesses before lock, wait and limit for new codes.
     otp-ttl: ${TRIP_OTP_TTL:30m}

@@ -25,7 +25,7 @@ import java.util.UUID;
  */
 @Component
 public class MarketplaceQuery {
-    /** Open order = published, no driver, one vehicle, an accepted quote and still before the application deadline. */
+    /** Open order = published (so not every vehicle slot is filled), an accepted quote and still before the application deadline. */
     private static final String FROM = """
              FROM shipments s
              JOIN shipment_quotes q ON q.shipment_id = s.id AND q.status = 'ACCEPTED'
@@ -34,7 +34,7 @@ public class MarketplaceQuery {
              JOIN LATERAL (SELECT province, district, ward FROM shipment_stops
                             WHERE shipment_id = s.id AND stop_type = 'DELIVERY' ORDER BY sequence_no DESC LIMIT 1) d ON TRUE
             WHERE s.status = 'PUBLISHED' AND s.assigned_driver_id IS NULL AND s.deleted_at IS NULL
-              AND s.vehicle_count = 1 AND s.pickup_time > :deadline
+              AND s.pickup_time > :deadline
             """;
 
     private static final String COLUMNS = """
@@ -42,7 +42,8 @@ public class MarketplaceQuery {
                    s.total_weight_kg, s.total_volume_m3, s.estimated_price, s.published_at, q.distance_km,
                    p.province AS p_province, p.district AS p_district, p.ward AS p_ward,
                    d.province AS d_province, d.district AS d_district, d.ward AS d_ward,
-                   (SELECT count(*) FROM shipment_stops x WHERE x.shipment_id = s.id AND x.stop_type = 'DELIVERY') AS delivery_count
+                   (SELECT count(*) FROM shipment_stops x WHERE x.shipment_id = s.id AND x.stop_type = 'DELIVERY') AS delivery_count,
+                   s.vehicle_count, (SELECT count(*) FROM shipment_assignments a WHERE a.shipment_id = s.id AND a.status = 'ACTIVE') AS assigned_count
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -83,9 +84,11 @@ public class MarketplaceQuery {
     }
 
     /** Admin overview of orders that reached the marketplace, with application counts and the chosen driver. */
-    public PageResponse<AdminMarketplaceShipment> adminShipments(ShipmentStatus status, String keyword, int page, int size) {
+    /** understaffed: published orders that still need drivers (fewer active assignments than vehicles), soonest pickup first. */
+    public PageResponse<AdminMarketplaceShipment> adminShipments(ShipmentStatus status, String keyword, boolean understaffed, int page, int size) {
         MapSqlParameterSource params = new MapSqlParameterSource();
         StringBuilder where = new StringBuilder(" WHERE s.deleted_at IS NULL AND s.status <> 'DRAFT'");
+        if (understaffed) where.append(" AND s.status = 'PUBLISHED' AND (SELECT count(*) FROM shipment_assignments a WHERE a.shipment_id = s.id AND a.status = 'ACTIVE') < s.vehicle_count");
         if (status != null) { where.append(" AND s.status = :status"); params.addValue("status", status.name()); }
         else where.append(" AND s.status IN ('PUBLISHED', 'ASSIGNED', 'EXPIRED', 'CANCELLED')");
         if (keyword != null && !keyword.isBlank()) { where.append(" AND s.shipment_code ILIKE :kw ESCAPE '\\'"); params.addValue("kw", contains(keyword.trim())); }
@@ -107,12 +110,15 @@ public class MarketplaceQuery {
                        u.full_name AS driver_name, p.province AS p_province, p.district AS p_district, p.ward AS p_ward,
                        d.province AS d_province, d.district AS d_district, d.ward AS d_ward,
                        (SELECT count(*) FROM driver_shipment_applications a WHERE a.shipment_id = s.id AND a.status = 'PENDING') AS pending,
-                       (SELECT count(*) FROM driver_shipment_applications a WHERE a.shipment_id = s.id) AS total
-                """ + from + where + " ORDER BY s.published_at DESC NULLS LAST, s.id LIMIT :limit OFFSET :offset";
+                       (SELECT count(*) FROM driver_shipment_applications a WHERE a.shipment_id = s.id) AS total,
+                       (SELECT count(*) FROM shipment_assignments a WHERE a.shipment_id = s.id AND a.status = 'ACTIVE') AS assigned_count
+                """ + from + where + (understaffed ? " ORDER BY s.pickup_time ASC NULLS LAST, s.id" : " ORDER BY s.published_at DESC NULLS LAST, s.id")
+                + " LIMIT :limit OFFSET :offset";
         List<AdminMarketplaceShipment> rows = jdbc.query(sql, params, (rs, i) -> new AdminMarketplaceShipment(
                 rs.getObject("id", UUID.class), rs.getString("shipment_code"), ShipmentStatus.valueOf(rs.getString("status")), instant(rs, "pickup_time"),
                 area(rs, "p_"), area(rs, "d_"), rs.getBigDecimal("estimated_price"), rs.getInt("vehicle_count"), rs.getLong("pending"), rs.getLong("total"),
-                rs.getObject("assigned_driver_id", UUID.class), rs.getString("driver_name"), instant(rs, "assigned_at"), instant(rs, "published_at")));
+                rs.getObject("assigned_driver_id", UUID.class), rs.getString("driver_name"), instant(rs, "assigned_at"), instant(rs, "published_at"),
+                rs.getInt("assigned_count")));
         return new PageResponse<>(rows, page, size, total, (int) ((total + size - 1) / size));
     }
 
@@ -123,7 +129,7 @@ public class MarketplaceQuery {
                 pickup == null ? null : pickup.minus(cutoff), area(rs, "p_"), area(rs, "d_"), rs.getInt("delivery_count"), type,
                 types.stream().filter(t -> t.code().equals(type)).map(VehicleTypeDto::name).findFirst().orElse(null), rs.getString("body_type_code"),
                 rs.getInt("total_quantity"), rs.getBigDecimal("total_weight_kg"), rs.getBigDecimal("total_volume_m3"), rs.getBigDecimal("estimated_price"),
-                rs.getBigDecimal("distance_km"), instant(rs, "published_at"));
+                rs.getBigDecimal("distance_km"), instant(rs, "published_at"), rs.getInt("vehicle_count"), rs.getInt("assigned_count"));
     }
 
     private static void text(StringBuilder where, MapSqlParameterSource params, String column, String name, String value) {

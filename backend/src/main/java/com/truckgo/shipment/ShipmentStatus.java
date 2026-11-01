@@ -14,7 +14,8 @@ public enum ShipmentStatus {
     private static final Map<ShipmentStatus, Set<ShipmentStatus>> TRANSITIONS = Map.of(
             DRAFT, EnumSet.of(PUBLISHED, CANCELLED),
             PUBLISHED, EnumSet.of(ASSIGNED, CANCELLED, EXPIRED),
-            ASSIGNED, EnumSet.of(DRIVER_ARRIVED, CANCELLED),
+            // back to PUBLISHED when the assigned driver is removed before the trip starts (marketplace)
+            ASSIGNED, EnumSet.of(DRIVER_ARRIVED, CANCELLED, PUBLISHED),
             DRIVER_ARRIVED, EnumSet.of(PICKED_UP, CANCELLED),
             PICKED_UP, EnumSet.of(IN_TRANSIT),
             IN_TRANSIT, EnumSet.of(DELIVERED),

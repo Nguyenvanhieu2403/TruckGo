@@ -5,6 +5,7 @@ import com.truckgo.notification.NotificationService;
 import com.truckgo.notification.NotificationType;
 import com.truckgo.shipment.Shipment;
 import com.truckgo.shipment.ShipmentCancelledEvent;
+import com.truckgo.shipment.ShipmentDeliveredEvent;
 import com.truckgo.shipment.ShipmentListingChangedEvent;
 import com.truckgo.shipment.ShipmentRepository;
 import com.truckgo.shipment.ShipmentStatus;
@@ -24,29 +25,34 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Closes applications when their order is cancelled or nobody was chosen before pickup. */
+/**
+ * Closes applications and releases assignments when their order is cancelled or did not get every driver it needs
+ * before pickup, and frees drivers and vehicles once a trip is delivered.
+ */
 @Component
 public class MarketplaceLifecycle {
     static final String EXPIRED_REASON = "Đơn đã hết hạn nhận tài xế";
+    /** Name recorded as the actor of changes made by the expiry job (shipment_status_histories.system_actor). */
+    public static final String EXPIRY_ACTOR = "marketplace-expiry-job";
     private static final Logger log = LoggerFactory.getLogger(MarketplaceLifecycle.class);
 
     private final DriverShipmentApplicationRepository applications;
     private final ShipmentRepository shipments;
     private final ShipmentStatusHistoryRepository statusHistory;
     private final MarketplaceViews views;
-    private final CustomerApplicationService customerApplications;
+    private final AssignmentService assignments;
     private final NotificationService notifications;
     private final MarketplaceCache cache;
     private final Clock clock;
 
     public MarketplaceLifecycle(DriverShipmentApplicationRepository applications, ShipmentRepository shipments, ShipmentStatusHistoryRepository statusHistory,
-                                MarketplaceViews views, CustomerApplicationService customerApplications, NotificationService notifications,
+                                MarketplaceViews views, AssignmentService assignments, NotificationService notifications,
                                 MarketplaceCache cache, Clock clock) {
         this.applications = applications;
         this.shipments = shipments;
         this.statusHistory = statusHistory;
         this.views = views;
-        this.customerApplications = customerApplications;
+        this.assignments = assignments;
         this.notifications = notifications;
         this.cache = cache;
         this.clock = clock;
@@ -62,8 +68,17 @@ public class MarketplaceLifecycle {
     public void onShipmentCancelled(ShipmentCancelledEvent event) {
         Shipment shipment = shipments.findById(event.shipmentId()).orElseThrow();
         int closed = closePending(shipment, "Khách hàng đã hủy đơn");
+        int released = assignments.releaseAll(shipment, AssignmentService.Actor.user(event.customerId()), "Khách hàng đã hủy đơn");
         cache.invalidateAfterCommit();
-        if (closed > 0) log.info("Closed {} applications of cancelled shipment {}", closed, event.shipmentId());
+        if (closed + released > 0) log.info("Closed {} applications and {} assignments of cancelled shipment {}", closed, released, event.shipmentId());
+    }
+
+    /** A delivered trip no longer occupies its drivers and vehicles. */
+    @EventListener
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onDelivered(ShipmentDeliveredEvent event) {
+        int finished = assignments.finishAll(event.shipmentId());
+        if (finished > 0) log.info("Finished {} assignments of delivered shipment {}", finished, event.shipmentId());
     }
 
     /**
@@ -76,16 +91,18 @@ public class MarketplaceLifecycle {
         Instant now = clock.instant();
         if (shipment == null || shipment.getStatus() != ShipmentStatus.PUBLISHED || shipment.isAssigned()
                 || shipment.getPickupTime() == null || shipment.getPickupTime().isAfter(now)) return false;
+        boolean partial = assignments.releaseAll(shipment, AssignmentService.Actor.system(EXPIRY_ACTOR), "Đơn hết hạn khi chưa đủ tài xế") > 0;
         shipment.markExpired();
         shipments.flush();
-        // Nobody acts here; the order's owner is recorded with an explicit system reason (changed_by is mandatory).
-        statusHistory.save(new ShipmentStatusHistory(shipmentId, ShipmentStatus.PUBLISHED, ShipmentStatus.EXPIRED, shipment.getCustomerId(),
-                "Hệ thống: quá giờ lấy hàng mà chưa chọn tài xế"));
+        // Nobody acts here: recorded as the expiry job, not as any user.
+        statusHistory.save(ShipmentStatusHistory.system(shipmentId, ShipmentStatus.PUBLISHED, ShipmentStatus.EXPIRED, EXPIRY_ACTOR,
+                partial ? "Quá giờ lấy hàng mà chưa đủ " + shipment.getVehicleCount() + " tài xế" : "Quá giờ lấy hàng mà chưa chọn tài xế"));
         int closed = closePending(shipment, EXPIRED_REASON);
         notifications.notify(shipment.getCustomerId(), NotificationType.SHIPMENT_EXPIRED, "Đơn " + shipment.getShipmentCode() + " đã hết hạn",
-                "Đơn " + shipment.getShipmentCode() + " đã quá giờ lấy hàng mà chưa chọn tài xế nên đã hết hạn.", "SHIPMENT", shipmentId);
+                "Đơn " + shipment.getShipmentCode() + (partial ? " đã quá giờ lấy hàng mà chưa đủ tài xế nên đã hết hạn."
+                        : " đã quá giờ lấy hàng mà chưa chọn tài xế nên đã hết hạn."), "SHIPMENT", shipmentId, "SHIPMENT_EXPIRED:" + shipmentId);
         cache.invalidateAfterCommit();
-        log.info("Shipment expired shipment={} closedApplications={}", shipmentId, closed);
+        log.info("Shipment expired shipment={} closedApplications={} releasedPartialAssignments={}", shipmentId, closed, partial);
         return true;
     }
 
@@ -96,7 +113,7 @@ public class MarketplaceLifecycle {
         applications.flush();
         Map<UUID, DriverProfile> drivers = views.drivers(pending.stream().map(DriverShipmentApplication::getDriverId).toList());
         Map<UUID, User> users = views.driverUsers(drivers.values());
-        pending.forEach(a -> customerApplications.notifyClosed(users.get(a.getDriverId()), NotificationType.APPLICATION_EXPIRED, shipment, a, reason));
+        pending.forEach(a -> assignments.notifyClosed(users.get(a.getDriverId()), NotificationType.APPLICATION_EXPIRED, shipment, a, reason));
         return pending.size();
     }
 }

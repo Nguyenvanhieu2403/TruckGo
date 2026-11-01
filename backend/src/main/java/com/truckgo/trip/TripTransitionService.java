@@ -11,6 +11,7 @@ import com.truckgo.shipment.AttachmentFileType;
 import com.truckgo.shipment.Shipment;
 import com.truckgo.shipment.ShipmentAttachment;
 import com.truckgo.shipment.ShipmentAttachmentRepository;
+import com.truckgo.shipment.ShipmentDeliveredEvent;
 import com.truckgo.shipment.ShipmentRepository;
 import com.truckgo.shipment.ShipmentStatus;
 import com.truckgo.shipment.ShipmentStatusHistory;
@@ -19,6 +20,7 @@ import com.truckgo.shipment.ShipmentStop;
 import com.truckgo.trip.dto.TripDtos.MilestoneRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,13 +56,16 @@ public class TripTransitionService {
     private final DeliveryConfirmationService confirmations;
     private final NotificationService notifications;
     private final TripEventHub events;
+    private final ApplicationEventPublisher publisher;
     private final TripProperties properties;
     private final Clock clock;
 
     public TripTransitionService(ShipmentRepository shipments, DriverProfileRepository drivers, StopProgressRepository progress,
                                  ShipmentStatusHistoryRepository statusHistory, ShipmentAttachmentRepository attachments,
                                  MilestoneAttachmentRepository milestoneAttachments, TrackingService tracking, DeliveryConfirmationService confirmations,
-                                 NotificationService notifications, TripEventHub events, TripProperties properties, Clock clock) {
+                                 NotificationService notifications, TripEventHub events, TripProperties properties, Clock clock,
+                                 ApplicationEventPublisher publisher) {
+        this.publisher = publisher;
         this.shipments = shipments;
         this.drivers = drivers;
         this.progress = progress;
@@ -150,6 +155,7 @@ public class TripTransitionService {
         tracking.endSession(trip.shipment().getId(), now);
         finish(trip, ShipmentStatus.IN_TRANSIT, request.note(), "Tài xế xác nhận đã giao hàng", "Tài xế đã giao hàng đơn ");
         confirmations.issue(trip.shipment());
+        publisher.publishEvent(new ShipmentDeliveredEvent(trip.shipment().getId()));
     }
 
     // ------------------------------------------------------------------ helpers

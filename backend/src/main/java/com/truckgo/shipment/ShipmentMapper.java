@@ -60,10 +60,11 @@ public class ShipmentMapper {
                 stops.stream().filter(x -> x.stopType() == StopType.DELIVERY).reduce((a, b) -> b).orElse(null),
                 stops, s.getItems().stream().map(this::item).toList(), s.getServices().stream().map(this::service).toList(),
                 attachments.stream().map(a -> attachment(s, a)).toList(),
-                history.stream().map(h -> new StatusHistoryResponse(h.getOldStatus(), h.getNewStatus(), h.getChangedBy(), h.getChangeReason(), h.getCreatedAt())).toList(),
+                history.stream().map(h -> new StatusHistoryResponse(h.getOldStatus(), h.getNewStatus(), h.getChangedBy(), h.getActorType().name(), h.getSystemActor(), h.getChangeReason(), h.getCreatedAt())).toList(),
                 warnings(s), actions(s, viewerIsOwner), s.getPublishedAt(), s.getCancelledAt(), s.getCancellationReason(), s.getCreatedAt(), s.getUpdatedAt(), s.getVersion(),
                 assignmentProvider().flatMap(p -> p.assignment(s)).orElse(null),
-                s.getStatus() == ShipmentStatus.DRAFT ? null : assignmentProvider().map(p -> p.applicationStats(s.getId())).orElse(null));
+                s.getStatus() == ShipmentStatus.DRAFT ? null : assignmentProvider().map(p -> p.applicationStats(s.getId())).orElse(null),
+                s.getStatus() == ShipmentStatus.DRAFT ? List.of() : assignmentProvider().map(p -> p.assignments(s)).orElse(List.of()));
     }
 
     private Optional<ShipmentAssignmentProvider> assignmentProvider() {

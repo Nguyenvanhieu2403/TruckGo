@@ -50,6 +50,14 @@ public class DriverShipmentApplication {
     public void withdraw(Instant at, String reason) { respond(ApplicationStatus.WITHDRAWN, at, reason); }
     public void expire(Instant at, String reason) { respond(ApplicationStatus.EXPIRED, at, reason); }
 
+    /** The accepted driver was removed from the order. */
+    public void release(Instant at, String reason) {
+        if (status != ApplicationStatus.ACCEPTED) throw MarketplaceErrors.notPending();
+        status = ApplicationStatus.RELEASED;
+        respondedAt = at;
+        responseReason = reason;
+    }
+
     private void respond(ApplicationStatus target, Instant at, String reason) {
         if (status != ApplicationStatus.PENDING) throw MarketplaceErrors.notPending();
         status = target;

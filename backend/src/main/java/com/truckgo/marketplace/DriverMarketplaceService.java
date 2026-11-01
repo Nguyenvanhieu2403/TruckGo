@@ -63,12 +63,17 @@ public class DriverMarketplaceService {
     private final NotificationService notifications;
     private final MarketplaceProperties properties;
     private final ShipmentProperties shipmentProperties;
+    private final ScheduleService schedule;
+    private final ShipmentAssignmentRepository assignments;
     private final Clock clock;
 
     public DriverMarketplaceService(MarketplaceQuery query, MarketplaceCache cache, MarketplaceViews views, VehicleEligibility eligibility,
                                     DriverShipmentApplicationRepository applications, ShipmentRepository shipments, DriverProfileRepository drivers,
                                     VehicleRepository vehicles, UserRepository users, ShipmentMapper shipmentMapper, NotificationService notifications,
-                                    MarketplaceProperties properties, ShipmentProperties shipmentProperties, Clock clock) {
+                                    MarketplaceProperties properties, ShipmentProperties shipmentProperties, ScheduleService schedule,
+                                    ShipmentAssignmentRepository assignments, Clock clock) {
+        this.schedule = schedule;
+        this.assignments = assignments;
         this.query = query;
         this.cache = cache;
         this.views = views;
@@ -106,13 +111,19 @@ public class DriverMarketplaceService {
         Optional<String> unavailable = unavailableReason(shipment);
         if (unavailable.isPresent() && mine.isEmpty()) throw notFound();
 
-        boolean assignedToMe = driver.map(d -> d.getId().equals(shipment.getAssignedDriverId())).orElse(false);
+        boolean assignedToMe = driver.map(d -> isOnShipment(d.getId(), shipment)).orElse(false);
         DriverShipmentApplication latest = mine.isEmpty() ? null : mine.getFirst();
         List<Vehicle> myVehicles = driver.map(d -> vehicles.findByDriverIdOrderByCreatedAtDesc(d.getId())).orElse(List.of());
         LocalDate pickupDate = pickupDate(shipment);
+        // Schedule: the driver's own trips and each vehicle's trips that overlap this order (checked again on assignment).
+        ScheduleService.Period period = schedule.period(shipment);
+        List<ScheduleService.Conflict> conflicts = driver.map(d -> schedule.conflicts(d.getId(), null, period, shipmentId)).orElse(List.of());
+        List<String> driverConflicts = ScheduleService.reasons(conflicts.stream().filter(ScheduleService.Conflict::driver).toList());
         List<VehicleOption> options = myVehicles.stream().map(v -> {
-            List<String> reasons = eligibility.reasons(shipment, v, pickupDate);
-            return new VehicleOption(v.getId(), v.getPlateNumber(), v.getVehicleType(), v.getMaxPayloadKg(), v.getLengthCm(), v.getWidthCm(), v.getHeightCm(), reasons.isEmpty(), reasons);
+            List<String> reasons = new java.util.ArrayList<>(eligibility.reasons(shipment, v, pickupDate));
+            reasons.addAll(ScheduleService.vehicleReasons(schedule.conflicts(null, v.getId(), period, shipmentId)));
+            return new VehicleOption(v.getId(), v.getPlateNumber(), v.getVehicleType(), v.getBodyTypeCode(), v.getMaxPayloadKg(), v.getLengthCm(), v.getWidthCm(),
+                    v.getHeightCm(), reasons.isEmpty(), reasons);
         }).toList();
         boolean approved = driver.map(DriverProfile::isApproved).orElse(false);
         boolean hasActive = mine.stream().anyMatch(a -> a.getStatus().isActive());
@@ -120,6 +131,7 @@ public class DriverMarketplaceService {
         String reason = unavailable.orElseGet(() -> !approved ? "Hồ sơ tài xế chưa được duyệt"
                 : hasActive ? null
                 : rejectedBefore ? "Khách hàng đã từ chối yêu cầu của bạn cho đơn này"
+                : !driverConflicts.isEmpty() ? "Bạn đã có chuyến khác trùng thời gian với đơn này"
                 : options.stream().noneMatch(VehicleOption::eligible) ? "Bạn chưa có xe đáp ứng yêu cầu của đơn" : null);
         boolean canApply = reason == null && !hasActive;
 
@@ -128,7 +140,8 @@ public class DriverMarketplaceService {
         return new MarketplaceShipmentDetail(shipment.getId(), shipment.getShipmentCode(), shipment.getStatus(), shipment.getPickupTime(), shipment.getDeliveryDeadline(),
                 deadline(shipment), full.vehicle(), shipment.getTotalQuantity(), shipment.getTotalWeightKg(), shipment.getTotalVolumeM3(), shipment.getCustomerNote(),
                 shipment.getEstimatedPrice(), views.distanceKm(shipmentId), assignedToMe, MarketplaceViews.stops(shipment, assignedToMe), full.items(), full.services(),
-                approved, canApply, canApply ? null : reason, latest == null ? null : brief(latest, latestVehicle), options);
+                approved, canApply, canApply ? null : reason, latest == null ? null : brief(latest, latestVehicle), options,
+                shipment.getVehicleCount(), (int) assignments.countByShipmentIdAndStatus(shipmentId, AssignmentStatus.ACTIVE), driverConflicts);
     }
 
     // ------------------------------------------------------------------ apply / withdraw
@@ -138,13 +151,16 @@ public class DriverMarketplaceService {
         DriverProfile driver = requireEligibleDriver(userId);
         // Same row lock as the customer's accept: an application can never slip in after the order was assigned.
         Shipment shipment = shipments.findByIdForUpdate(shipmentId).filter(s -> s.getStatus() != ShipmentStatus.DRAFT).orElseThrow(DriverMarketplaceService::notFound);
-        if (shipment.isAssigned()) throw MarketplaceErrors.alreadyAssigned();
+        if (shipment.isAssigned()) throw MarketplaceErrors.fullyAssigned(shipment.getVehicleCount());
         unavailableReason(shipment).ifPresent(why -> { throw MarketplaceErrors.notAvailable(why); });
 
         Vehicle vehicle = vehicles.findByIdAndDriverId(request.vehicleId(), driver.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy xe của bạn"));
         List<String> issues = eligibility.reasons(shipment, vehicle, pickupDate(shipment));
         if (!issues.isEmpty()) throw MarketplaceErrors.vehicleNotEligible(issues);
+        // Early answer from PostgreSQL (never from the cache); the assignment re-checks under the exclusion constraints.
+        List<String> busy = ScheduleService.reasons(schedule.conflicts(driver.getId(), vehicle.getId(), schedule.period(shipment), shipmentId));
+        if (!busy.isEmpty()) throw MarketplaceErrors.scheduleConflict(busy);
 
         List<DriverShipmentApplication> previous = applications.findByDriverIdAndShipmentIdOrderByAppliedAtDesc(driver.getId(), shipmentId);
         if (previous.stream().anyMatch(a -> a.getStatus().isActive()))
@@ -165,7 +181,8 @@ public class DriverMarketplaceService {
         }
         String driverName = users.findById(userId).map(User::getFullName).orElse("Tài xế");
         notifications.notify(shipment.getCustomerId(), NotificationType.APPLICATION_RECEIVED, "Có tài xế muốn nhận đơn " + shipment.getShipmentCode(),
-                driverName + " đã gửi yêu cầu nhận đơn " + shipment.getShipmentCode() + " với xe " + vehicle.getPlateNumber() + ".", "SHIPMENT", shipmentId);
+                driverName + " đã gửi yêu cầu nhận đơn " + shipment.getShipmentCode() + " với xe " + vehicle.getPlateNumber() + ".", "SHIPMENT", shipmentId,
+                "APPLICATION_RECEIVED:" + application.getId());
         log.info("Driver application created application={} shipment={} driver={}", application.getId(), shipmentId, driver.getId());
         return response(application, shipment, vehicle, driver.getId());
     }
@@ -179,7 +196,7 @@ public class DriverMarketplaceService {
         applications.flush();
         Shipment shipment = shipments.findById(application.getShipmentId()).orElseThrow(DriverMarketplaceService::notFound);
         notifications.notify(shipment.getCustomerId(), NotificationType.APPLICATION_WITHDRAWN, "Tài xế đã rút yêu cầu nhận đơn " + shipment.getShipmentCode(),
-                "Một tài xế đã rút yêu cầu nhận đơn " + shipment.getShipmentCode() + ".", "SHIPMENT", shipment.getId());
+                "Một tài xế đã rút yêu cầu nhận đơn " + shipment.getShipmentCode() + ".", "SHIPMENT", shipment.getId(), "APPLICATION_WITHDRAWN:" + applicationId);
         log.info("Driver application withdrawn application={}", applicationId);
         return response(application, shipment, vehicles.findById(application.getVehicleId()).orElse(null), driver.getId());
     }
@@ -212,11 +229,15 @@ public class DriverMarketplaceService {
     Optional<String> unavailableReason(Shipment shipment) {
         if (shipment.getStatus() != ShipmentStatus.PUBLISHED) return Optional.of(shipment.isAssigned() ? "Đơn đã có tài xế nhận" : "Đơn không còn nhận tài xế");
         if (shipment.isAssigned()) return Optional.of("Đơn đã có tài xế nhận");
-        if (shipment.getVehicleCount() != 1) return Optional.of("Đơn cần nhiều xe chưa hỗ trợ nhận qua Marketplace");
         if (views.acceptedQuote(shipment.getId()).isEmpty()) return Optional.of("Đơn chưa có giá được khách hàng xác nhận");
         Instant deadline = deadline(shipment);
         if (deadline == null || !clock.instant().isBefore(deadline)) return Optional.of("Đã hết hạn nhận đơn");
         return Optional.empty();
+    }
+
+    /** The driver holds an active assignment on the order (lead or one of several vehicles). */
+    private boolean isOnShipment(UUID driverId, Shipment shipment) {
+        return driverId.equals(shipment.getAssignedDriverId()) || assignments.existsByShipmentIdAndDriverIdAndStatus(shipment.getId(), driverId, AssignmentStatus.ACTIVE);
     }
 
     private DriverProfile requireEligibleDriver(UUID userId) {
@@ -234,7 +255,7 @@ public class DriverMarketplaceService {
     }
 
     private DriverApplicationResponse response(DriverShipmentApplication a, Shipment shipment, Vehicle vehicle, UUID driverId) {
-        boolean assignedToMe = shipment != null && driverId.equals(shipment.getAssignedDriverId()) && a.getStatus() == ApplicationStatus.ACCEPTED;
+        boolean assignedToMe = shipment != null && a.getStatus() == ApplicationStatus.ACCEPTED && isOnShipment(driverId, shipment);
         return new DriverApplicationResponse(a.getId(), a.getStatus(), shipment == null ? null : views.shipment(shipment), MarketplaceViews.vehicle(vehicle),
                 a.getDriverMessage(), a.getResponseReason(), a.getAppliedAt(), a.getRespondedAt(), a.isPending(),
                 shipment == null ? List.of() : MarketplaceViews.stops(shipment, assignedToMe));

@@ -1,12 +1,16 @@
 package com.truckgo.marketplace;
 
+import com.truckgo.admin.AdminAuditService;
 import com.truckgo.common.exception.ResourceNotFoundException;
 import com.truckgo.common.response.PageResponse;
 import com.truckgo.driver.DriverProfile;
 import com.truckgo.marketplace.dto.MarketplaceDtos.AdminApplicationResponse;
 import com.truckgo.marketplace.dto.MarketplaceDtos.AdminAssignmentResponse;
 import com.truckgo.marketplace.dto.MarketplaceDtos.AdminMarketplaceShipment;
+import com.truckgo.marketplace.dto.MarketplaceDtos.AssignmentOverview;
+import com.truckgo.marketplace.dto.MarketplaceDtos.ScheduleEntry;
 import com.truckgo.shipment.Shipment;
+import com.truckgo.shipment.ShipmentRepository;
 import com.truckgo.shipment.ShipmentStatus;
 import com.truckgo.user.User;
 import com.truckgo.vehicle.Vehicle;
@@ -17,30 +21,82 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Read-only monitoring of the marketplace for administrators. */
+/**
+ * Marketplace monitoring for administrators (orders still missing drivers, applications, assignment history, driver
+ * and vehicle schedules) and the exceptional cases: removing or replacing a driver before the trip starts. Every
+ * change is also written to admin_audit_logs.
+ */
 @Service
 public class AdminMarketplaceService {
     private final MarketplaceQuery query;
     private final DriverShipmentApplicationRepository applications;
     private final ShipmentAssignmentHistoryRepository assignments;
     private final MarketplaceViews views;
+    private final AssignmentViews assignmentViews;
+    private final AssignmentService assignmentService;
+    private final ShipmentRepository shipments;
+    private final AdminAuditService audit;
+    private final Clock clock;
 
     public AdminMarketplaceService(MarketplaceQuery query, DriverShipmentApplicationRepository applications, ShipmentAssignmentHistoryRepository assignments,
-                                   MarketplaceViews views) {
+                                   MarketplaceViews views, AssignmentViews assignmentViews, AssignmentService assignmentService, ShipmentRepository shipments,
+                                   AdminAuditService audit, Clock clock) {
         this.query = query;
         this.applications = applications;
         this.assignments = assignments;
         this.views = views;
+        this.assignmentViews = assignmentViews;
+        this.assignmentService = assignmentService;
+        this.shipments = shipments;
+        this.audit = audit;
+        this.clock = clock;
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<AdminMarketplaceShipment> shipments(ShipmentStatus status, String keyword, int page, int size) {
-        return query.adminShipments(status, keyword, page, size);
+    public PageResponse<AdminMarketplaceShipment> shipments(ShipmentStatus status, String keyword, boolean understaffed, int page, int size) {
+        return query.adminShipments(status, keyword, understaffed, page, size);
     }
+
+    @Transactional(readOnly = true)
+    public AssignmentOverview shipmentAssignments(UUID shipmentId) {
+        return assignmentViews.overview(shipments.findById(shipmentId).orElseThrow(AdminMarketplaceService::shipmentNotFound));
+    }
+
+    @Transactional
+    public AssignmentOverview release(UUID adminId, UUID shipmentId, UUID assignmentId, String reason) {
+        Shipment shipment = shipments.findByIdForUpdate(shipmentId).orElseThrow(AdminMarketplaceService::shipmentNotFound);
+        ShipmentAssignment released = assignmentService.release(shipment, assignmentId, AssignmentService.Actor.user(adminId), reason.trim());
+        audit.record(adminId, "ASSIGNMENT_RELEASED", "SHIPMENT", shipmentId, "assignment=" + released.getId() + " driver=" + released.getDriverId() + " reason=" + reason.trim());
+        return assignmentViews.overview(shipment);
+    }
+
+    @Transactional
+    public AssignmentOverview replace(UUID adminId, UUID shipmentId, UUID assignmentId, UUID applicationId, String reason) {
+        Shipment shipment = shipments.findByIdForUpdate(shipmentId).orElseThrow(AdminMarketplaceService::shipmentNotFound);
+        DriverShipmentApplication application = applications.findByIdForUpdate(applicationId).filter(a -> a.getShipmentId().equals(shipmentId))
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy yêu cầu nhận đơn"));
+        if (shipment.getPickupTime() == null || !clock.instant().isBefore(shipment.getPickupTime()))
+            throw MarketplaceErrors.notAvailable("Đã quá giờ lấy hàng, không thể chọn tài xế");
+        if (views.acceptedQuote(shipmentId).isEmpty()) throw MarketplaceErrors.notAvailable("Đơn chưa có báo giá được xác nhận, không thể chọn tài xế");
+        var outcome = assignmentService.replace(shipment, assignmentId, application, AssignmentService.Actor.user(adminId), reason.trim());
+        audit.record(adminId, "ASSIGNMENT_REPLACED", "SHIPMENT", shipmentId, "old=" + assignmentId + " new=" + outcome.assignment().getId() + " reason=" + reason.trim());
+        return assignmentViews.overview(shipment);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<ScheduleEntry> schedules(UUID driverId, UUID vehicleId, Instant from, Instant to, int page, int size) {
+        Instant start = from != null ? from : clock.instant().minus(java.time.Duration.ofDays(1));
+        Instant end = to != null && to.isAfter(start) ? to : start.plus(java.time.Duration.ofDays(30));
+        return assignmentViews.schedules(driverId, vehicleId, start, end, page, size);
+    }
+
+    private static ResourceNotFoundException shipmentNotFound() { return new ResourceNotFoundException("Không tìm thấy đơn vận chuyển"); }
 
     @Transactional(readOnly = true)
     public PageResponse<AdminApplicationResponse> applications(ApplicationStatus status, UUID shipmentId, UUID driverId, int page, int size) {
@@ -68,21 +124,8 @@ public class AdminMarketplaceService {
     @Transactional(readOnly = true)
     public PageResponse<AdminAssignmentResponse> assignments(int page, int size) {
         Page<ShipmentAssignmentHistory> rows = assignments.findAll(PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by(Sort.Direction.DESC, "createdAt")));
-        List<ShipmentAssignmentHistory> content = rows.getContent();
-        Map<UUID, Shipment> shipments = views.shipments(content.stream().map(ShipmentAssignmentHistory::getShipmentId).toList());
-        Map<UUID, Vehicle> vehicles = views.vehicles(content.stream().map(ShipmentAssignmentHistory::getVehicleId).filter(java.util.Objects::nonNull).toList());
-        Map<UUID, DriverProfile> drivers = views.drivers(content.stream().map(ShipmentAssignmentHistory::getNewDriverId).filter(java.util.Objects::nonNull).toList());
-        Map<UUID, User> driverUsers = views.driverUsers(drivers.values());
-        Map<UUID, User> actors = views.users(content.stream().map(ShipmentAssignmentHistory::getPerformedBy).toList());
-        return PageResponse.of(rows, h -> {
-            Shipment s = shipments.get(h.getShipmentId());
-            User driver = h.getNewDriverId() == null ? null : driverUsers.get(h.getNewDriverId());
-            Vehicle v = h.getVehicleId() == null ? null : vehicles.get(h.getVehicleId());
-            User actor = actors.get(h.getPerformedBy());
-            return new AdminAssignmentResponse(h.getId(), h.getShipmentId(), s == null ? null : s.getShipmentCode(), h.getAction(), h.getNewDriverId(),
-                    driver == null ? null : driver.getFullName(), h.getPreviousDriverId(), h.getVehicleId(), v == null ? null : v.getPlateNumber(),
-                    h.getApplicationId(), h.getReason(), h.getPerformedBy(), actor == null ? null : actor.getFullName(), h.getCreatedAt());
-        });
+        List<AdminAssignmentResponse> mapped = assignmentViews.history(rows.getContent());
+        return new PageResponse<>(mapped, rows.getNumber(), rows.getSize(), rows.getTotalElements(), rows.getTotalPages());
     }
 
     private static AdminApplicationResponse admin(DriverShipmentApplication a, Shipment s, User driver, Vehicle v) {

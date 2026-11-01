@@ -12,13 +12,13 @@ import com.truckgo.pricing.quote.ShipmentQuote;
 import com.truckgo.pricing.quote.ShipmentQuoteRepository;
 import com.truckgo.shipment.Shipment;
 import com.truckgo.shipment.ShipmentRepository;
-import com.truckgo.shipment.ShipmentStatus;
 import com.truckgo.shipment.ShipmentStop;
 import com.truckgo.shipment.StopType;
 import com.truckgo.user.User;
 import com.truckgo.user.UserRepository;
 import com.truckgo.vehicle.Vehicle;
 import com.truckgo.vehicle.VehicleRepository;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -38,8 +38,11 @@ class MarketplaceViews {
     private final DriverProfileRepository drivers;
     private final UserRepository users;
     private final ShipmentQuoteRepository quotes;
+    private final JdbcTemplate jdbc;
 
-    MarketplaceViews(ShipmentRepository shipments, VehicleRepository vehicles, DriverProfileRepository drivers, UserRepository users, ShipmentQuoteRepository quotes) {
+    MarketplaceViews(ShipmentRepository shipments, VehicleRepository vehicles, DriverProfileRepository drivers, UserRepository users, ShipmentQuoteRepository quotes,
+                     JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
         this.shipments = shipments;
         this.vehicles = vehicles;
         this.drivers = drivers;
@@ -64,7 +67,13 @@ class MarketplaceViews {
 
     BigDecimal distanceKm(UUID shipmentId) { return acceptedQuote(shipmentId).map(ShipmentQuote::getDistanceKm).orElse(null); }
 
-    long completedTrips(UUID driverId) { return shipments.countByAssignedDriverIdAndStatus(driverId, ShipmentStatus.COMPLETED); }
+    /** Completed orders the driver carried, as lead or as one of several vehicles. */
+    long completedTrips(UUID driverId) {
+        Long n = jdbc.queryForObject("""
+                SELECT count(DISTINCT a.shipment_id) FROM shipment_assignments a JOIN shipments s ON s.id = a.shipment_id
+                 WHERE a.driver_id = ? AND a.status = 'FINISHED' AND s.status = 'COMPLETED'""", Long.class, driverId);
+        return n == null ? 0 : n;
+    }
 
     DriverBrief driver(DriverProfile profile, User user, boolean revealPhone) {
         return new DriverBrief(profile.getId(), user == null ? null : user.getFullName(), profile.getLicenseClass(), completedTrips(profile.getId()),
@@ -72,7 +81,7 @@ class MarketplaceViews {
     }
 
     static VehicleBrief vehicle(Vehicle v) {
-        return v == null ? null : new VehicleBrief(v.getId(), v.getPlateNumber(), v.getVehicleType(), v.getMaxPayloadKg(), v.getLengthCm(), v.getWidthCm(), v.getHeightCm());
+        return v == null ? null : new VehicleBrief(v.getId(), v.getPlateNumber(), v.getVehicleType(), v.getBodyTypeCode(), v.getMaxPayloadKg(), v.getLengthCm(), v.getWidthCm(), v.getHeightCm());
     }
 
     ShipmentBrief shipment(Shipment s) {
