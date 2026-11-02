@@ -27,7 +27,10 @@ import { LocationSharingService } from '../../core/geo/location-sharing.service'
       @if (error()) { <div class="alert alert-error" role="alert">{{ error() }}</div> }
       <div class="actions-row">
         @if (active()) { <button class="btn btn-ghost" type="button" (click)="stop()" [disabled]="busy()">Dừng chia sẻ</button> }
-        @else { <button class="btn btn-primary" type="button" (click)="start()" [disabled]="busy()">Bắt đầu chia sẻ vị trí</button> }
+        @else if (searching()) {
+          <button class="btn btn-primary" type="button" (click)="start()" [disabled]="busy()">Thử lại</button>
+          <button class="btn btn-ghost" type="button" (click)="stop()" [disabled]="busy()">Dừng chia sẻ</button>
+        } @else { <button class="btn btn-primary" type="button" (click)="start()" [disabled]="busy()">Bắt đầu chia sẻ vị trí</button> }
       </div>
     }
   </section>`,
@@ -44,7 +47,10 @@ export class GpsPanelComponent {
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly active = computed(() => this.sharing.shipmentId() === this.shipmentId() && (this.sharing.state() === 'sharing' || this.sharing.state() === 'requesting'));
+  /** Sharing was started but the device has no position yet; the service keeps retrying. */
+  protected readonly searching = computed(() => this.sharing.state() === 'error' && this.sharing.isSharing(this.shipmentId()));
   protected readonly stateLabel = computed(() => {
+    if (this.searching()) return 'Chưa có vị trí, đang thử lại…';
     if (this.active()) return this.sharing.state() === 'requesting' ? 'Đang xin quyền vị trí…' : 'Đang chia sẻ vị trí';
     if (this.sharing.state() === 'denied') return 'Không có quyền vị trí';
     if (this.sharing.state() === 'unavailable') return 'Thiết bị không hỗ trợ định vị';

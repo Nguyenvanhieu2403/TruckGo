@@ -13,11 +13,15 @@ describe('LocationSharingService', () => {
   let onPosition: (p: GeolocationPosition) => void;
   let onError: (e: GeolocationPositionError) => void;
   let cleared = false;
+  let watchOptions: PositionOptions[] = [];
 
   beforeEach(() => {
     cleared = false;
+    watchOptions = [];
     const geo = {
-      watchPosition: (s: (p: GeolocationPosition) => void, e: (err: GeolocationPositionError) => void) => { onPosition = s; onError = e; return 7; },
+      watchPosition: (s: (p: GeolocationPosition) => void, e: (err: GeolocationPositionError) => void, o: PositionOptions) => {
+        onPosition = s; onError = e; watchOptions.push(o); return 7 + watchOptions.length;
+      },
       clearWatch: () => { cleared = true; }, getCurrentPosition: () => undefined,
     } as unknown as Geolocation;
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), { provide: GEOLOCATION, useValue: geo }] });
@@ -68,6 +72,38 @@ describe('LocationSharingService', () => {
     expect(svc.state()).toBe('denied');
     expect(svc.message()).toContain('từ chối quyền vị trí');
     expect(cleared).toBe(true);
+  });
+
+  const unavailable = { code: 2, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3, message: 'kCLErrorLocationUnknown' } as GeolocationPositionError;
+
+  it('falls back to network positioning when the device has no GPS fix, then explains how to turn location on', () => {
+    const svc = TestBed.inject(LocationSharingService);
+    svc.start('sh-1', POLICY);
+    expect(watchOptions[0].enableHighAccuracy).toBe(true);
+    onError(unavailable);
+    expect(watchOptions[1].enableHighAccuracy).toBe(false);
+    expect(svc.state()).toBe('error');
+    expect(svc.isSharing('sh-1')).toBe(true);
+    onError(unavailable);
+    expect(svc.message()).toContain('Dịch vụ định vị');
+    expect(svc.message()).toContain('kCLErrorLocationUnknown');
+    onPosition(fix(21.0285, 105.8542, Date.now()));     // the device found a position after all
+    expect(svc.state()).toBe('sharing');
+    http.expectOne('/api/v1/driver/trips/sh-1/location').flush(ok(ack));
+    expect(svc.message()).toBeNull();
+  });
+
+  it('restarts the watch when the driver tries again after an error', () => {
+    const svc = TestBed.inject(LocationSharingService);
+    svc.start('sh-1', POLICY);
+    svc.start('sh-1', POLICY);
+    expect(watchOptions.length).toBe(1);   // already watching: nothing to do
+    onError(unavailable);
+    onError(unavailable);
+    svc.start('sh-1', POLICY);
+    expect(watchOptions.length).toBe(3);
+    expect(watchOptions[2].enableHighAccuracy).toBe(true);
+    expect(svc.state()).toBe('requesting');
   });
 
   it('stops when the server no longer accepts positions for the trip', () => {

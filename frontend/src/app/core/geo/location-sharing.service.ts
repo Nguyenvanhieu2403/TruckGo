@@ -31,21 +31,36 @@ export class LocationSharingService {
   private pausedUntil = 0;
   private inFlight = false;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  /** GPS-grade fixes first; devices that cannot give one (no GPS, a desktop) fall back to network positioning. */
+  private highAccuracy = true;
 
   start(shipmentId: string, policy: TrackingPolicy): void {
     if (!this.geo) { this.state.set('unavailable'); this.message.set('Trình duyệt không hỗ trợ định vị.'); return; }
-    if (this.watchId !== null && this.shipmentId() === shipmentId) return;
+    // Starting again while the device has no position (state 'error') is the driver's "try again": restart the watch.
+    if (this.watchId !== null && this.shipmentId() === shipmentId && this.state() !== 'error') return;
     this.stop();
     this.shipmentId.set(shipmentId);
     this.policy = policy;
+    this.highAccuracy = true;
     this.state.set('requesting');
     this.message.set(null);
-    this.watchId = this.geo.watchPosition(p => this.onPosition(p), e => this.onError(e), { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 });
+    this.watch();
     // watchPosition only fires when the device reports a change; a vehicle standing still would otherwise look
-    // offline to the customer. Ask for a fresh fix on the idle interval as well.
+    // offline to the customer. Ask for a fresh fix on the idle interval as well. This also keeps retrying while the
+    // device has no position yet.
     const geo = this.geo;
-    this.heartbeat = setInterval(() => geo.getCurrentPosition(p => this.onPosition(p), () => undefined, { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 }),
-      Math.max(this.policy.movingIntervalSeconds, 5) * 1000);
+    this.heartbeat = setInterval(() => geo.getCurrentPosition(p => this.onPosition(p), e => { if (e.code === e.PERMISSION_DENIED) this.onError(e); },
+      { ...this.options(), maximumAge: this.highAccuracy ? 0 : 60_000 }), Math.max(this.policy.movingIntervalSeconds, 5) * 1000);
+  }
+
+  private watch(): void {
+    if (!this.geo) return;
+    if (this.watchId !== null) this.geo.clearWatch(this.watchId);
+    this.watchId = this.geo.watchPosition(p => this.onPosition(p), e => this.onError(e), this.options());
+  }
+
+  private options(): PositionOptions {
+    return this.highAccuracy ? { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 } : { enableHighAccuracy: false, maximumAge: 60_000, timeout: 30_000 };
   }
 
   stop(): void {
@@ -112,14 +127,26 @@ export class LocationSharingService {
       this.message.set('Bạn đã từ chối quyền vị trí. Hãy cho phép định vị cho trang này trong cài đặt trình duyệt để chia sẻ vị trí.');
       this.stop();
       this.state.set('denied');
+    } else if (e.code === e.POSITION_UNAVAILABLE && this.highAccuracy) {
+      // The device has no GPS-grade fix (common on laptops and with GPS off): try Wi-Fi/network positioning instead.
+      this.highAccuracy = false;
+      this.state.set('error');
+      this.message.set('Chưa lấy được vị trí GPS, đang thử định vị qua Wi-Fi/mạng…');
+      this.watch();
     } else {
       this.state.set('error');
-      this.message.set(e.code === e.TIMEOUT ? 'Không lấy được vị trí (hết thời gian chờ). Đang thử lại…' : 'Không xác định được vị trí của thiết bị.');
+      this.message.set(e.code === e.TIMEOUT ? 'Không lấy được vị trí (hết thời gian chờ). Đang thử lại…' : unavailableMessage(e.message));
     }
   }
 }
 
 function round(v: number): number { return Math.round(v * 1e6) / 1e6; }
+
+function unavailableMessage(detail: string | undefined): string {
+  return 'Thiết bị chưa xác định được vị trí. Hãy bật định vị cho thiết bị và trình duyệt '
+    + '(điện thoại: bật Vị trí/GPS; macOS: Cài đặt hệ thống › Quyền riêng tư & Bảo mật › Dịch vụ định vị, bật cho trình duyệt đang dùng) '
+    + 'và bật Wi-Fi. TruckGo vẫn tự thử lại.' + (detail ? ` (Chi tiết: ${detail})` : '');
+}
 
 function staleMessage(ageMs: number): string {
   const minutes = Math.round(ageMs / 60_000);
