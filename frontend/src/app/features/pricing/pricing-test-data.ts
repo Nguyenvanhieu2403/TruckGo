@@ -11,7 +11,7 @@ export function quote(overrides: Partial<Quote> = {}): Quote {
     breakdown: { basePrice: 100000, distancePrice: 160000, weightSurcharge: 50000, volumeSurcharge: 0, serviceSurcharge: 30000, additionalStopSurcharge: 20000, timeSurcharge: 0, otherSurcharge: 0 },
     totalPrice: 360000, currency: 'VND',
     lines: [{ lineNo: 1, component: 'BASE', code: 'BASE', name: 'Giá mở cửa', description: null, quantity: 1, unitPrice: 100000, amount: 100000 }],
-    reviewReasonCode: null, reviewReason: null, rejectionReason: null, adjustmentReason: null, expiresAt: '2026-11-02T00:00:00Z',
+    reviewReasonCode: null, reviewReason: null, rejectionReason: null, adjustmentReason: null, expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
     acceptedAt: null, rejectedAt: null, supersededAt: null, createdAt: '2026-11-01T00:00:00Z',
     actions: { acceptable: true, rejectable: true, recalculable: true },
     ...overrides,

@@ -128,7 +128,7 @@ describe('QuotePanelComponent', () => {
   it('re-reads the quote when it expires and then shows it as expired', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-01T23:59:00Z'));
-    const { el, fixture } = render(quote());
+    const { el, fixture } = render(quote({ expiresAt: '2026-11-02T00:00:00Z' }));
     http.expectNone('/api/v1/shipments/sh-1/pricing');
     vi.advanceTimersByTime(61_000);
     http.expectOne('/api/v1/shipments/sh-1/pricing').flush(ok(quote({ status: 'EXPIRED', actions: { acceptable: false, rejectable: false, recalculable: true } })));
